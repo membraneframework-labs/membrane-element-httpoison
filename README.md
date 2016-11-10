@@ -22,11 +22,11 @@ This should copy `https://en.wikipedia.org/wiki/Main_Page` to `./test`:
 
 ```elixir
 {:ok, sink} = Membrane.Element.File.Sink.start_link(%Membrane.Element.File.SinkOptions{location: "./test"})
-Membrane.Element.File.Sink.play(sink)
+Membrane.Element.play(sink)
 
 {:ok, source} = Membrane.Element.HTTP.Source.start_link(%Membrane.Element.HTTP.SourceOptions{location: "https://en.wikipedia.org/wiki/Main_Page"})
-Membrane.Element.HTTP.Source.link(source, sink)
-Membrane.Element.HTTP.Source.play(source)
+Membrane.Element.link(source, sink)
+Membrane.Element.play(source)
 ```
 
 # Authors
