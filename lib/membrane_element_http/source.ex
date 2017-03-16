@@ -1,34 +1,34 @@
-defmodule Membrane.Element.HTTP.SourceOptions do
-  defstruct location: nil
-
-  @type t :: %Membrane.Element.HTTP.SourceOptions{
-    location: String.t
-  }
-end
-
-
-defmodule Membrane.Element.HTTP.Source do
+defmodule Membrane.Element.HTTPoison.Source do
   use Membrane.Element.Base.Source
-  alias Membrane.Element.HTTP.SourceOptions
+  use Membrane.Mixins.Log
+  alias Membrane.Element.HTTPoison.Source.Options
 
 
-  def handle_prepare(%SourceOptions{location: location}) do
+  def_known_source_pads %{
+    :source => {:always, :any}
+  }
+
+
+  # Private API
+
+  @doc false
+  def handle_init(%Options{method: method, location: location, headers: headers, body: body, options: options}) do
     {:ok, %{
       location: location,
-      content_type: "application/octet-stream"
+      method: method,
+      headers: headers,
+      body: body,
+      options: options,
+      ref: nil,
     }}
   end
 
 
-  @doc """
-  Callback invoked when we receive command to start playing.
-
-  It starts asynchronous request to the given location.
-  """
-  def handle_play(%{location: location} = state) do
-    case HTTPoison.get(location, %{}, stream_to: self()) do
-      {:ok, _ref} ->
-        {:ok, state}
+  @doc false
+  def handle_play(%{method: method, location: location, body: body, headers: headers, options: options} = state) do
+    case HTTPoison.request(method, location, body, headers, options ++ [stream_to: self()]) do
+      {:ok, %HTTPoison.AsyncResponse{id: ref}} ->
+        {:ok, %{state | ref: ref}}
 
       {:error, reason} ->
         {:error, {:httperror, reason}}
@@ -36,64 +36,44 @@ defmodule Membrane.Element.HTTP.Source do
   end
 
 
-  @doc """
-  Callback invoked when we receive status code 200, which is fine.
-  """
+  @doc false
   def handle_other(%HTTPoison.AsyncStatus{code: 200}, state) do
     debug("Got 200 OK")
     {:ok, state}
   end
 
-
-  @doc """
-  Callback invoked when we receive status code other than 200, indicating error.
-  """
   def handle_other(%HTTPoison.AsyncStatus{code: code}, state) do
     warn("Got unexpected status code #{code}")
     {:error, {:code, code}, state}
   end
 
-
-  @doc """
-  Callback invoked when we receive response headers from the server.
-
-  Look for Content-Type header, and if it is present, save it so buffers we
-  produce have valid content type set.
-  """
+@doc false
   def handle_other(%HTTPoison.AsyncHeaders{headers: headers}, state) do
     debug("Got headers #{inspect(headers)}")
-
-    case headers |> List.keyfind("Content-Type", 0) do
-      nil ->
-        {:ok, state}
-
-      {_, value} ->
-        {:ok, %{state | content_type: value}}
-    end
+    {:ok, state}
   end
 
-
-  @doc """
-  Callback invoked when we receive chunk of data.
-
-  It is forwarded to the linked destinations.
-  """
-  def handle_other(%HTTPoison.AsyncChunk{chunk: chunk}, %{content_type: content_type} = state) do
+  def handle_other(%HTTPoison.AsyncChunk{chunk: chunk}, state) do
     debug("Got chunk #{inspect(chunk)}")
 
-    {:send_buffer, {%Membrane.Caps{content: content_type}, chunk}, state}
+    {:ok, [{:send, {:source, %Membrane.Buffer{payload: chunk}}}], state}
   end
 
-
-  @doc """
-  Callback invoked when data downloading ends.
-
-  It emits EOS downstream event. (TODO)
-  """
   def handle_other(%HTTPoison.AsyncEnd{}, state) do
     debug("End of stream")
 
-    # TODO send EOS event
+    {:ok, [{:send, {:source, Membrane.Event.eos()}}], state}
+  end
+
+  def handle_other(%HTTPoison.AsyncRedirect{headers: headers}, state) do
+    case headers |> List.keyfind("Location", 0) do
+      {"Location", new_location} ->
+        debug("Redirect to #{new_location}")
+
+      _ ->
+        warn("Got redirect but without specyfying location")
+    end
+
     {:ok, state}
   end
 end
