@@ -19,7 +19,7 @@ defmodule Membrane.Element.HTTPoison.Source do
       headers: headers,
       body: body,
       options: options,
-      ref: nil,
+      async_response: nil,
       mode: mode,
     }}
   end
@@ -36,8 +36,8 @@ defmodule Membrane.Element.HTTPoison.Source do
     end
 
     case HTTPoison.request(method, location, body, headers, options) do
-      {:ok, %HTTPoison.AsyncResponse{id: ref}} ->
-        {:ok, %{state | ref: ref}}
+      {:ok, async_response} ->
+        {:ok, %{state | async_response: async_response}}
 
       {:error, reason} ->
         {:error, {:httperror, reason}}
@@ -46,8 +46,8 @@ defmodule Membrane.Element.HTTPoison.Source do
 
 
   @doc false
-  def handle_event(:source, _caps, %Membrane.Event{type: :underrun}, %{ref: ref, mode: :pull} = state) do
-    case HTTPoison.stream_next(ref) do
+  def handle_event(:source, _caps, %Membrane.Event{type: :underrun}, %{async_response: async_response, mode: :pull} = state) do
+    case HTTPoison.stream_next(async_response) do
       {:ok, _response} ->
         {:ok, state}
 
