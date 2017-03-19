@@ -1,4 +1,4 @@
-defmodule Membrane.Element.HTTPoison.Mixhttpoison do
+defmodule Membrane.Element.HTTPoison.Mixfile do
   use Mix.Project
 
   def project do
