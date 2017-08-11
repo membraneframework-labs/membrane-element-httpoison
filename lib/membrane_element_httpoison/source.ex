@@ -35,52 +35,51 @@ defmodule Membrane.Element.HTTPoison.Source do
     with {:ok, async_response} <-
       HTTPoison.request(method, location, body, headers, options)
     do {:ok, {[], %{state | async_response: async_response, streaming: true}}}
-    else {:error, reason} -> {:error, {:httperror, reason}}
+    else {:error, reason} -> {:error, {{:httperror, reason}, state}}
     end
   end
 
   @doc false
   def handle_demand(:source, size, _, %{streaming: true} = state) do
-    IO.puts "http demand (streaming)"
     {:ok, {[], state |> Map.update!(:demand, & &1 + size)}}
   end
 
   @doc false
   def handle_demand(:source, size, _, state) do
-    IO.puts "http demand"
-    with {:ok, state} <- state |> Map.update!(:demand, & &1 + size) |> stream_next
-    do
-      IO.puts "streaming"
-      {:ok, {[], state}}
-    end
+    with {:ok, state} <- state |> Map.update!(:demand, & &1 + size) |> stream_next,
+    do: {:ok, {[], state}},
+    else: ({:error, reason} -> {:error, {reason, state}})
   end
 
   @doc false
   def handle_other(%HTTPoison.AsyncStatus{code: 200}, state) do
-    debug("Got 200 OK")
+    debug "HTTPoison: Got 200 OK"
     with {:ok, state} <- state |> stream_next,
-    do: {:ok, {[], state}}
+    do: {:ok, {[], state}},
+    else: ({:error, reason} -> {:error, {reason, state}})
   end
 
   @doc false
-  def handle_other(%HTTPoison.AsyncStatus{code: code}, _state) do
-    warn("Got unexpected status code #{code}")
-    {:error, {:code, code}}
+  def handle_other(%HTTPoison.AsyncStatus{code: code}, state) do
+    warn "HTTPoison: Got unexpected status code #{code}"
+    {:error, {{:code, code}, state}}
   end
 
   @doc false
   def handle_other(%HTTPoison.AsyncHeaders{headers: headers}, state) do
-    debug("Got headers #{inspect(headers)}")
+    debug "HTTPoison: Got headers #{inspect(headers)}"
     with {:ok, state} <- state |> stream_next,
-    do: {:ok, {[], state}}
+    do: {:ok, {[], state}},
+    else: ({:error, reason} -> {:error, {reason, state}})
   end
 
   @doc false
   def handle_other(%HTTPoison.AsyncChunk{chunk: chunk}, state) do
-    debug("Got chunk #{inspect(chunk)}")
+    debug "HTTPoison: Got chunk #{inspect(chunk)}"
 
     with {:ok, state} <- state |> Map.update!(:demand, & &1 - 1) |> stream_next,
-    do: {:ok, {[buffer: {:source, %Buffer{payload: chunk}}], state}}
+    do: {:ok, {[buffer: {:source, %Buffer{payload: chunk}}], state}},
+    else: ({:error, reason} -> {:error, {reason, state}})
   end
 
 
@@ -93,15 +92,15 @@ defmodule Membrane.Element.HTTPoison.Source do
 
   @doc false
   def handle_other(%HTTPoison.AsyncRedirect{headers: headers}, state) do
-    case headers |> List.keyfind("Location", 0) do
-      {"Location", new_location} ->
-        debug("Redirect to #{new_location}")
-
-      _ ->
-        warn("Got redirect but without specyfying location")
+    with {"Location", new_location} <- headers |> List.keyfind("Location", 0, :no_location)
+    do
+      debug "HTTPoison: redirecting to #{new_location}"
+    else
+      :no_location -> warn "HTTPoison: got redirect but without specyfying location"
     end
-
-    {:ok, {[], state}}
+    with {:ok, state} <- state |> stream_next,
+    do: {:ok, {[], state}},
+    else: ({:error, reason} -> {:error, {reason, state}})
   end
 
   defp stream_next(%{demand: demand} = state)
@@ -112,6 +111,7 @@ defmodule Membrane.Element.HTTPoison.Source do
   defp stream_next(%{demand: demand, async_response: resp} = state)
   when demand > 0
   do
+    debug "HTTPoison: requesting next chunk"
     with {:ok, resp} <- resp |> HTTPoison.stream_next
     do {:ok, %{state | streaming: true, async_response: resp}}
     else {:error, reason} -> warn_error "Http stream_next/1 error", reason
