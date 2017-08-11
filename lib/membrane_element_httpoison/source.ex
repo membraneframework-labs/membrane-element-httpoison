@@ -30,29 +30,36 @@ defmodule Membrane.Element.HTTPoison.Source do
 
   @doc false
   def handle_play(%{method: method, location: location, body: body, headers: headers, options: options} = state) do
+    IO.inspect location
     options = options |> Keyword.merge(stream_to: self(), async: :once)
     with {:ok, async_response} <-
       HTTPoison.request(method, location, body, headers, options)
-    do {:ok, {[], %{state | async_response: async_response}}}
+    do {:ok, {[], %{state | async_response: async_response, streaming: true}}}
     else {:error, reason} -> {:error, {:httperror, reason}}
     end
   end
 
   @doc false
   def handle_demand(:source, size, _, %{streaming: true} = state) do
+    IO.puts "http demand (streaming)"
     {:ok, {[], state |> Map.update!(:demand, & &1 + size)}}
   end
 
   @doc false
-  def handle_demand(:source, size, _, %{async_response: resp} = state) do
-    with {:ok, resp} <- resp |> HTTPoison.stream_next,
-    do: {:ok, {[], %{state | async_response: resp, streaming: true} |> Map.update!(:demand, & &1 + size)}}
+  def handle_demand(:source, size, _, state) do
+    IO.puts "http demand"
+    with {:ok, state} <- state |> Map.update!(:demand, & &1 + size) |> stream_next
+    do
+      IO.puts "streaming"
+      {:ok, {[], state}}
+    end
   end
 
   @doc false
   def handle_other(%HTTPoison.AsyncStatus{code: 200}, state) do
     debug("Got 200 OK")
-    {:ok, {[], state}}
+    with {:ok, state} <- state |> stream_next,
+    do: {:ok, {[], state}}
   end
 
   @doc false
@@ -64,20 +71,18 @@ defmodule Membrane.Element.HTTPoison.Source do
   @doc false
   def handle_other(%HTTPoison.AsyncHeaders{headers: headers}, state) do
     debug("Got headers #{inspect(headers)}")
-    {:ok, {[], state}}
+    with {:ok, state} <- state |> stream_next,
+    do: {:ok, {[], state}}
   end
 
   @doc false
-  def handle_other(%HTTPoison.AsyncChunk{chunk: chunk}, %{demand: demand, async_response: resp} = state) do
+  def handle_other(%HTTPoison.AsyncChunk{chunk: chunk}, state) do
     debug("Got chunk #{inspect(chunk)}")
 
-    with {:ok, resp} <-
-      (if demand > 1 do resp |> HTTPoison.stream_next else {:ok, resp} end),
-    do: {:ok, {
-          [buffer: {:source, %Buffer{payload: chunk}}],
-          %{state | async_response: resp, demand: demand - 1},
-        }}
+    with {:ok, state} <- state |> Map.update!(:demand, & &1 - 1) |> stream_next,
+    do: {:ok, {[buffer: {:source, %Buffer{payload: chunk}}], state}}
   end
+
 
   @doc false
   def handle_other(%HTTPoison.AsyncEnd{}, state) do
@@ -97,5 +102,19 @@ defmodule Membrane.Element.HTTPoison.Source do
     end
 
     {:ok, {[], state}}
+  end
+
+  defp stream_next(%{demand: demand} = state)
+  when demand <= 0
+  do {:ok, %{state | streaming: false}}
+  end
+
+  defp stream_next(%{demand: demand, async_response: resp} = state)
+  when demand > 0
+  do
+    with {:ok, resp} <- resp |> HTTPoison.stream_next
+    do {:ok, %{state | streaming: true, async_response: resp}}
+    else {:error, reason} -> warn_error "Http stream_next/1 error", reason
+    end
   end
 end
