@@ -52,7 +52,7 @@ defmodule Membrane.Element.HTTPoison.Source do
   @doc false
   def handle_other(%HTTPoison.AsyncStatus{code: 200}, state) do
     debug("Got 200 OK")
-    {:ok, state}
+    {:ok, {[], state}}
   end
 
   @doc false
@@ -64,7 +64,7 @@ defmodule Membrane.Element.HTTPoison.Source do
   @doc false
   def handle_other(%HTTPoison.AsyncHeaders{headers: headers}, state) do
     debug("Got headers #{inspect(headers)}")
-    {:ok, state}
+    {:ok, {[], state}}
   end
 
   @doc false
@@ -96,6 +96,6 @@ defmodule Membrane.Element.HTTPoison.Source do
         warn("Got redirect but without specyfying location")
     end
 
-    {:ok, state}
+    {:ok, {[], state}}
   end
 end
