@@ -30,7 +30,6 @@ defmodule Membrane.Element.HTTPoison.Source do
 
   @doc false
   def handle_play(%{method: method, location: location, body: body, headers: headers, options: options} = state) do
-    IO.inspect location
     options = options |> Keyword.merge(stream_to: self(), async: :once)
     with {:ok, async_response} <-
       HTTPoison.request(method, location, body, headers, options)
