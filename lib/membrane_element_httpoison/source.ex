@@ -39,12 +39,12 @@ defmodule Membrane.Element.HTTPoison.Source do
   end
 
   @doc false
-  def handle_demand(:source, size, _, %{streaming: true} = state) do
+  def handle_demand(:source, size, :buffers, _, %{streaming: true} = state) do
     {:ok, {[], state |> Map.update!(:demand, & &1 + size)}}
   end
 
   @doc false
-  def handle_demand(:source, size, _, state) do
+  def handle_demand(:source, size, :buffers, _, state) do
     with {:ok, state} <- state |> Map.update!(:demand, & &1 + size) |> stream_next,
     do: {:ok, {[], state}},
     else: ({:error, reason} -> {:error, {reason, state}})
@@ -85,7 +85,7 @@ defmodule Membrane.Element.HTTPoison.Source do
   @doc false
   def handle_other(%HTTPoison.AsyncEnd{}, state) do
     debug("End of stream")
-
+    warn "HTTPoison EOS"
     {:ok, {[event: {:source, Event.eos()}], %{state | streaming: false}}}
   end
 
