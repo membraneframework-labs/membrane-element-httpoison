@@ -2,7 +2,7 @@
   "hackney": {:hex, :hackney, "1.9.0", "51c506afc0a365868469dcfc79a9d0b94d896ec741cfd5bd338f49a5ec515bfe", [:rebar3], [{:certifi, "2.0.0", [hex: :certifi, optional: false]}, {:idna, "5.1.0", [hex: :idna, optional: false]}, {:metrics, "1.0.1", [hex: :metrics, optional: false]}, {:mimerl, "1.0.2", [hex: :mimerl, optional: false]}, {:ssl_verify_fun, "1.1.1", [hex: :ssl_verify_fun, optional: false]}]},
   "httpoison": {:hex, :httpoison, "0.13.0", "bfaf44d9f133a6599886720f3937a7699466d23bb0cd7a88b6ba011f53c6f562", [:mix], [{:hackney, "~> 1.8", [hex: :hackney, optional: false]}]},
   "idna": {:hex, :idna, "5.1.0", "d72b4effeb324ad5da3cab1767cb16b17939004e789d8c0ad5b70f3cea20c89a", [:rebar3], [{:unicode_util_compat, "0.3.1", [hex: :unicode_util_compat, optional: false]}]},
-  "membrane_core": {:git, "git@github.com:membraneframework/membrane-core.git", "da2b8dd460f51dd9855ee3ad1580d61cc15e0fb0", [branch: "feature/pull"]},
+  "membrane_core": {:git, "git@github.com:membraneframework/membrane-core.git", "c2b7b979e0378a7e7ebbea7c754a10ff50a59026", [branch: "feature/pull"]},
   "metrics": {:hex, :metrics, "1.0.1", "25f094dea2cda98213cecc3aeff09e940299d950904393b2a29d191c346a8486", [:rebar3], []},
   "mimerl": {:hex, :mimerl, "1.0.2", "993f9b0e084083405ed8252b99460c4f0563e41729ab42d9074fd5e52439be88", [:rebar3], []},
   "porcelain": {:hex, :porcelain, "2.0.2", "c1d4863de3e391195e36457bb3d7e17ee1bca5a44f1d708bc037c313342f58e9", [:mix], []},
