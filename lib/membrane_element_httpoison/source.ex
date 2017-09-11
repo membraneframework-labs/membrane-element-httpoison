@@ -1,6 +1,6 @@
 defmodule Membrane.Element.HTTPoison.Source do
   use Membrane.Element.Base.Source
-  use Membrane.Mixins.Log
+  use Membrane.Mixins.Log, tags: :membrane_element_httpoison
   alias __MODULE__.Options
   alias Membrane.{Buffer, Event}
 
@@ -87,6 +87,12 @@ defmodule Membrane.Element.HTTPoison.Source do
     debug("End of stream")
     warn "HTTPoison EOS"
     {{:ok, event: {:source, Event.eos}}, %{state | streaming: false}}
+  end
+
+  @doc false
+  def handle_other(%HTTPoison.Error{reason: reason}, state) do
+    warn("Error #{inspect(reason)}")
+    {{:error, reason}, state}
   end
 
   @doc false
