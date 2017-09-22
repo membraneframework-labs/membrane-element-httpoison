@@ -24,6 +24,7 @@ defmodule Membrane.Element.HTTPoison.Source do
       async_response: nil,
       streaming: false,
       demand: 0,
+      type: nil,
       pos_counter: 0,
     }}
   end
@@ -35,13 +36,15 @@ defmodule Membrane.Element.HTTPoison.Source do
   end
 
   @doc false
-  def handle_demand(:source, size, :buffers, _, %{streaming: true} = state) do
-    {:ok, state |> Map.update!(:demand, & &1 + size)}
+  def handle_demand(:source, size, type, _, %{demand: demand, streaming: true} = state)
+  when type in [:buffers, :bytes] do
+    {:ok, %{state | demand: demand + size, type: type}}
   end
 
   @doc false
-  def handle_demand(:source, size, :buffers, _, state) do
-    with {:ok, state} <- state |> Map.update!(:demand, & &1 + size) |> stream_next,
+  def handle_demand(:source, size, type, _, %{demand: demand} = state)
+  when type in [:buffers, :bytes] do
+    with {:ok, state} <- %{state | demand: demand + size, type: type} |> stream_next,
     do: {:ok, state},
     else: ({:error, reason} -> {{:error, reason}, state})
   end
@@ -73,13 +76,18 @@ defmodule Membrane.Element.HTTPoison.Source do
   end
 
   @doc false
-  def handle_other(%HTTPoison.AsyncChunk{chunk: chunk}, state) do
+  def handle_other(%HTTPoison.AsyncChunk{chunk: chunk}, %{type: type} = state) do
     debug "HTTPoison: Got chunk #{inspect(chunk)}"
+
+    demand_update = case type do
+      :buffers -> & &1 - 1
+      :bytes   -> & &1 - byte_size(chunk) |> max(0)
+    end
 
     with {:ok, state} <-
       state
       |> Map.update!(:pos_counter, & &1 + byte_size(chunk))
-      |> Map.update!(:demand, & &1 - 1)
+      |> Map.update!(:demand, demand_update)
       |> stream_next,
     do: {{:ok, buffer: {:source, %Buffer{payload: chunk}}}, state},
     else: ({:error, reason} -> {{:error, reason}, state})
