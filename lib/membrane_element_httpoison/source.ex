@@ -26,14 +26,23 @@ defmodule Membrane.Element.HTTPoison.Source do
       demand: 0,
       type: nil,
       pos_counter: 0,
+      playing: false,
     }}
   end
 
 
   @doc false
   def handle_play(state) do
-    state |> connect(use_range: false)
+    %{state | playing: true} |> connect
   end
+
+  @doc false
+  def handle_prepare(:playing, state) do
+    {:ok, %{state | playing: false}}
+  end
+
+  @doc false
+  def handle_prepare(_, state), do: {:ok, state}
 
   @doc false
   def handle_demand(:source, size, type, _, %{demand: demand, streaming: true} = state)
@@ -75,6 +84,10 @@ defmodule Membrane.Element.HTTPoison.Source do
     else: ({:error, reason} -> {{:error, reason}, state})
   end
 
+  def handle_other(%HTTPoison.AsyncChunk{}, %{playing: false} = state) do
+    {:ok, %{state | streaming: false}}
+  end
+
   @doc false
   def handle_other(%HTTPoison.AsyncChunk{chunk: chunk}, %{type: type} = state) do
     debug "HTTPoison: Got chunk #{inspect(chunk)}"
@@ -104,7 +117,7 @@ defmodule Membrane.Element.HTTPoison.Source do
   @doc false
   def handle_other(%HTTPoison.Error{reason: reason}, state) do
     warn("Error #{inspect(reason)}")
-    state |> connect(use_range: true)
+    state |> connect
   end
 
   @doc false
@@ -135,9 +148,9 @@ defmodule Membrane.Element.HTTPoison.Source do
     end
   end
 
-  defp connect(%{method: method, location: location, body: body, headers: headers, options: options, pos_counter: pos} = state, use_range: use_range) do
+  defp connect(%{method: method, location: location, body: body, headers: headers, options: options, pos_counter: pos} = state) do
     options = options |> Keyword.merge(stream_to: self(), async: :once)
-    headers = if use_range, do: [{"Range", "bytes=#{pos}-"} | headers], else: headers
+    headers = [{"Range", "bytes=#{pos}-"} | headers]
     with {:ok, async_response} <-
       HTTPoison.request(method, location, body, headers, options)
     do {:ok, %{state | async_response: async_response, streaming: true}}
