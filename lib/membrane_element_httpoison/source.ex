@@ -111,12 +111,7 @@ defmodule Membrane.Element.HTTPoison.Source do
   def handle_other(%HTTPoison.AsyncEnd{}, state) do
     debug("End of stream")
     warn "HTTPoison EOS"
-    buffer = [buffer: {:source, %Buffer{payload: chunk}}]
-      |> provided(that: state.playback_state == :playing)
-    {
-      {:ok, buffer ++ [event: {:source, Event.eos}]},
-      %{state | streaming: false, last_chunk: nil}
-    }
+    {{:ok, event: {:source, Event.eos}}, %{state | streaming: false}}
   end
 
   @doc false
