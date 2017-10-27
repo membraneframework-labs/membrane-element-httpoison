@@ -133,8 +133,8 @@ defmodule Membrane.Element.HTTPoison.Source do
     else: ({:error, reason} -> {{:error, reason}, state})
   end
 
-  defp stream_next(%{demand: demand, playback_state: playback} = state)
-  when demand <= 0 or playback != :playing
+  defp stream_next(%{demand: demand, playing: playing} = state)
+  when demand <= 0 or not playing
   do {:ok, %{state | streaming: false}}
   end
 
