@@ -90,18 +90,34 @@ defmodule Membrane.Element.HTTPoison.Source do
 
   @doc false
   def handle_other(%HTTPoison.AsyncChunk{chunk: chunk}, %{type: type} = state) do
-    debug "HTTPoison: Got chunk #{inspect(chunk)}"
+    crop_size = 100
+    cropped_size = byte_size(chunk) - 2*crop_size
+    case chunk do
+      <<first::binary-size(crop_size), _::binary-size(cropped_size), last::binary>>
+        -> IO.puts """
+          HTTPoison debug: got chunk of length #{byte_size chunk}, starting with:
+            #{inspect first, limit: crop_size}
+          ending with:
+            #{inspect last, limit: crop_size}
+          """
+      _ -> IO.puts """
+          HTTPoison debug: got chunk of length #{byte_size chunk}
+            #{inspect chunk}
+          """
+    end
 
     demand_update = case type do
       :buffers -> & &1 - 1
       :bytes   -> & &1 - byte_size(chunk) |> max(0)
     end
 
-    with {:ok, state} <-
-      state
+    state = state
       |> Map.update!(:pos_counter, & &1 + byte_size(chunk))
       |> Map.update!(:demand, demand_update)
-      |> stream_next,
+
+    IO.puts "HTTPoison debug: pos_counter is now #{state.pos_counter} (#{state.pos_counter/1_000_000} MB)\n"
+
+    with {:ok, state} <- state |> stream_next,
     do: {{:ok, buffer: {:source, %Buffer{payload: chunk}}}, state},
     else: ({:error, reason} -> {{:error, reason}, state})
   end
@@ -109,8 +125,7 @@ defmodule Membrane.Element.HTTPoison.Source do
 
   @doc false
   def handle_other(%HTTPoison.AsyncEnd{}, state) do
-    debug("End of stream")
-    warn "HTTPoison EOS"
+    info "HTTPoison EOS"
     {{:ok, event: {:source, Event.eos}}, %{state | streaming: false}}
   end
 
@@ -128,9 +143,7 @@ defmodule Membrane.Element.HTTPoison.Source do
     else
       :no_location -> warn "HTTPoison: got redirect but without specyfying location"
     end
-    with {:ok, state} <- state |> stream_next,
-    do: {:ok, state},
-    else: ({:error, reason} -> {{:error, reason}, state})
+    state |> handle_ok_status
   end
 
   defp stream_next(%{demand: demand, playing: playing} = state)
@@ -144,13 +157,16 @@ defmodule Membrane.Element.HTTPoison.Source do
     debug "HTTPoison: requesting next chunk"
     with {:ok, resp} <- resp |> HTTPoison.stream_next
     do {:ok, %{state | streaming: true, async_response: resp}}
-    else {:error, reason} -> warn_error "Http stream_next/1 error", {:stream_next, reason}
+    else {:error, reason} ->
+      warn_error("Http stream_next/1 error", {:stream_next, reason})
+      state |> connect
     end
   end
 
   defp connect(%{method: method, location: location, body: body, headers: headers, options: options, pos_counter: pos} = state) do
     options = options |> Keyword.merge(stream_to: self(), async: :once)
     headers = [{"Range", "bytes=#{pos}-"} | headers]
+    IO.inspect "HTTPoison debug: connecting, request: #{inspect {method, location, body, headers, options}}"
     with {:ok, async_response} <-
       HTTPoison.request(method, location, body, headers, options)
     do {:ok, %{state | async_response: async_response, streaming: true}}
