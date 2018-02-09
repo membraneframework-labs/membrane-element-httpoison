@@ -31,7 +31,7 @@ defmodule Membrane.Element.HTTPoison.Mixfile do
 
   defp deps do
     [
-      {:membrane_core, git: "git@github.com:membraneframework/membrane-core.git", branch: "feature/pull"},
+      {:membrane_core, git: "git@github.com:membraneframework/membrane-core.git"},
       {:httpoison, "~> 0.13.0"},
     ]
   end
