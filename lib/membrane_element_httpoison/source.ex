@@ -59,6 +59,18 @@ defmodule Membrane.Element.HTTPoison.Source do
   end
 
   @doc false
+  def handle_other(%struct{id: msg_id} = msg, %{async_response: %{id: id}} = state)
+  when msg_id != id
+  and struct in [
+      HTTPoison.AsyncChunk, HTTPoison.AsyncEnd, HTTPoison.AsyncHeaders,
+      HTTPoison.AsyncRedirect, HTTPoison.AsyncStatus, HTTPoison.Error,
+    ]
+  do
+    warn "Ignoring message #{inspect msg} because it does not match current response id: #{inspect id}"
+    {:ok, state}
+  end
+
+  @doc false
   def handle_other(%HTTPoison.AsyncStatus{code: 200}, state) do
     debug "HTTPoison: Got 200 OK"
     state |> handle_ok_status
@@ -68,6 +80,12 @@ defmodule Membrane.Element.HTTPoison.Source do
   def handle_other(%HTTPoison.AsyncStatus{code: 206}, state) do
     debug "HTTPoison: Got 206 Partial Content"
     state |> handle_ok_status
+  end
+
+  @doc false
+  def handle_other(%HTTPoison.AsyncStatus{code: 416}, state) do
+   warn "HTTPoison: Got 416 Invalid Range"
+   {{:ok, event: {:source, Event.eos}}, %{state | streaming: false}}
   end
 
   @doc false
