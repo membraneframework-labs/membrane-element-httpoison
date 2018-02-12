@@ -32,7 +32,7 @@ defmodule Membrane.Element.HTTPoison.Mixfile do
   defp deps do
     [
       {:membrane_core, git: "git@github.com:membraneframework/membrane-core.git"},
-      {:httpoison, "~> 0.13.0"},
+      {:httpoison, "~> 1.0.0"},
     ]
   end
 end
