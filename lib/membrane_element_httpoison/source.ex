@@ -4,10 +4,44 @@ defmodule Membrane.Element.HTTPoison.Source do
   alias __MODULE__.Options
   alias Membrane.{Buffer, Event}
 
-
+  
 
   def_known_source_pads %{
-    :source => {:always, :pull, :any}
+    source: {:always, :pull, :any}
+  }
+
+  def_options %{
+    location: [
+      type: :string,
+      description: "The URL to fetch by the element",
+      required: true,
+      regex: ~r[^(http|https)://.+$],
+    ],
+    method: [
+      type: :atom,
+      description: "HTTP method to use",
+      required: true,
+      default: :get, 
+      enum: ~w[get post put patch delete head options]a,
+    ],
+    body: [
+      type: :string,
+      description: "Request body",
+      required: false,
+      default: "",
+    ],
+    headers: [
+      type: :keyword,
+      description: "List of additional request headers in format accepted by `HTTPoison.request/5`",
+      required: false,
+      default: [],
+    ],
+    options: [
+      type: :any,
+      description: "Additional options to HTTPoison in format accepted by `HTTPoison.request/5`",
+      required: false,
+      default: nil,
+    ],
   }
 
 

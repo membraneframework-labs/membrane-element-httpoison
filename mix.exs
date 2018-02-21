@@ -8,10 +8,10 @@ defmodule Membrane.Element.HTTPoison.Mixfile do
      elixir: "~> 1.3",
      elixirc_paths: elixirc_paths(Mix.env),
      description: "Membrane Multimedia Framework (HTTPoison Element)",
-     maintainers: ["Marcin Lewandowski"],
+     maintainers: ["Marcin Lewandowski", "Mateusz Front"],
      licenses: ["MIT"],
      name: "Membrane Element: HTTPoison",
-     source_url: "httpoisons://bitbucket.org/radiokit/membrane-element-httpoison",
+     source_url: "http://github.com/membraneframework/membrane-element-httpoison",
      preferred_cli_env: [espec: :test],
      deps: deps()]
   end
@@ -32,6 +32,7 @@ defmodule Membrane.Element.HTTPoison.Mixfile do
   defp deps do
     [
       {:membrane_core, git: "git@github.com:membraneframework/membrane-core.git"},
+      # {:membrane_core, path: "/Users/marcin/aktivitis/radiokit/membrane-core"},
       {:httpoison, "~> 1.0.0"},
     ]
   end
