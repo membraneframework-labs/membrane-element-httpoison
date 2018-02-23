@@ -37,10 +37,10 @@ defmodule Membrane.Element.HTTPoison.Source do
       default: [],
     ],
     options: [
-      type: :any,
+      type: :keyword,
       description: "Additional options to HTTPoison in format accepted by `HTTPoison.request/5`",
       required: false,
-      default: nil,
+      default: [],
     ],
   }
 
