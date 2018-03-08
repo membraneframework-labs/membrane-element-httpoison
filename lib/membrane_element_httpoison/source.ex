@@ -139,22 +139,6 @@ defmodule Membrane.Element.HTTPoison.Source do
 
   @doc false
   def handle_other(%HTTPoison.AsyncChunk{chunk: chunk}, %{type: type} = state) do
-    crop_size = 100
-    cropped_size = byte_size(chunk) - 2*crop_size
-    case chunk do
-      <<first::binary-size(crop_size), _::binary-size(cropped_size), last::binary>>
-        -> IO.puts """
-          HTTPoison debug: got chunk of length #{byte_size chunk}, starting with:
-            #{inspect first, limit: crop_size}
-          ending with:
-            #{inspect last, limit: crop_size}
-          """
-      _ -> IO.puts """
-          HTTPoison debug: got chunk of length #{byte_size chunk}
-            #{inspect chunk}
-          """
-    end
-
     demand_update = case type do
       :buffers -> & &1 - 1
       :bytes   -> & &1 - byte_size(chunk) |> max(0)
@@ -163,8 +147,6 @@ defmodule Membrane.Element.HTTPoison.Source do
     state = state
       |> Map.update!(:pos_counter, & &1 + byte_size(chunk))
       |> Map.update!(:demand, demand_update)
-
-    IO.puts "HTTPoison debug: pos_counter is now #{state.pos_counter} (#{state.pos_counter/1_000_000} MB)\n"
 
     {{:ok, buffer: {:source, %Buffer{payload: chunk}}}, state |> stream_next}
   end
@@ -217,7 +199,7 @@ defmodule Membrane.Element.HTTPoison.Source do
   defp connect(%{method: method, location: location, body: body, headers: headers, options: options, pos_counter: pos} = state) do
     options = options |> Keyword.merge(stream_to: self(), async: :once)
     headers = [{"Range", "bytes=#{pos}-"} | headers]
-    IO.inspect "HTTPoison debug: connecting, request: #{inspect {method, location, body, headers, options}}"
+    debug "HTTPoison: connecting, request: #{inspect {method, location, body, headers, options}}"
     with {:ok, async_response} <-
       HTTPoison.request(method, location, body, headers, options)
     do {:ok, %{state | async_response: async_response, streaming: true}}
