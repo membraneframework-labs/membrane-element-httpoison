@@ -4,7 +4,7 @@ defmodule Membrane.Element.HTTPoison.Source do
   alias __MODULE__.Options
   alias Membrane.{Buffer, Event}
 
-  
+
 
   def_known_source_pads %{
     source: {:always, :pull, :any}
@@ -21,7 +21,7 @@ defmodule Membrane.Element.HTTPoison.Source do
       type: :atom,
       description: "HTTP method to use",
       required: true,
-      default: :get, 
+      default: :get,
       enum: ~w[get post put patch delete head options]a,
     ],
     body: [
@@ -87,9 +87,8 @@ defmodule Membrane.Element.HTTPoison.Source do
   @doc false
   def handle_demand(:source, size, type, _, %{demand: demand} = state)
   when type in [:buffers, :bytes] do
-    with {:ok, state} <- %{state | demand: demand + size, type: type} |> stream_next,
-    do: {:ok, state},
-    else: ({:error, reason} -> {{:error, reason}, state})
+    state = %{state | demand: demand + size, type: type}
+    {:ok, state |> stream_next}
   end
 
   @doc false
@@ -107,13 +106,13 @@ defmodule Membrane.Element.HTTPoison.Source do
   @doc false
   def handle_other(%HTTPoison.AsyncStatus{code: 200}, state) do
     debug "HTTPoison: Got 200 OK"
-    state |> handle_ok_status
+    {:ok, state |> stream_next}
   end
 
  @doc false
   def handle_other(%HTTPoison.AsyncStatus{code: 206}, state) do
     debug "HTTPoison: Got 206 Partial Content"
-    state |> handle_ok_status
+    {:ok, state |> stream_next}
   end
 
   @doc false
@@ -131,9 +130,7 @@ defmodule Membrane.Element.HTTPoison.Source do
   @doc false
   def handle_other(%HTTPoison.AsyncHeaders{headers: headers}, state) do
     debug "HTTPoison: Got headers #{inspect(headers)}"
-    with {:ok, state} <- state |> stream_next,
-    do: {:ok, state},
-    else: ({:error, reason} -> {{:error, reason}, state})
+    {:ok, state |> stream_next}
   end
 
   def handle_other(%HTTPoison.AsyncChunk{}, %{playing: false} = state) do
@@ -169,11 +166,8 @@ defmodule Membrane.Element.HTTPoison.Source do
 
     IO.puts "HTTPoison debug: pos_counter is now #{state.pos_counter} (#{state.pos_counter/1_000_000} MB)\n"
 
-    with {:ok, state} <- state |> stream_next,
-    do: {{:ok, buffer: {:source, %Buffer{payload: chunk}}}, state},
-    else: ({:error, reason} -> {{:error, reason}, state})
+    {{:ok, buffer: {:source, %Buffer{payload: chunk}}}, state |> stream_next}
   end
-
 
   @doc false
   def handle_other(%HTTPoison.AsyncEnd{}, state) do
@@ -195,24 +189,29 @@ defmodule Membrane.Element.HTTPoison.Source do
     else
       :no_location -> warn "HTTPoison: got redirect but without specyfying location"
     end
-    state |> handle_ok_status
+    {:ok, state |> stream_next}
+  end
+
+  def handle_other(:httpoison_stream_next, state) do
+    debug "HTTPoison: requesting next chunk"
+    with {:ok, resp} <- state.async_response |> HTTPoison.stream_next
+    do {:ok, %{state | async_response: resp}}
+    else {:error, reason} ->
+      warn_error("Http stream_next/1 error", {:stream_next, reason})
+      %{state | streaming: false} |> connect
+    end
   end
 
   defp stream_next(%{demand: demand, playing: playing} = state)
   when demand <= 0 or not playing
-  do {:ok, %{state | streaming: false}}
+  do %{state | streaming: false}
   end
 
-  defp stream_next(%{demand: demand, async_response: resp} = state)
+  defp stream_next(%{demand: demand} = state)
   when demand > 0
   do
-    debug "HTTPoison: requesting next chunk"
-    with {:ok, resp} <- resp |> HTTPoison.stream_next
-    do {:ok, %{state | streaming: true, async_response: resp}}
-    else {:error, reason} ->
-      warn_error("Http stream_next/1 error", {:stream_next, reason})
-      state |> connect
-    end
+    send self(), :httpoison_stream_next
+    %{state | streaming: true}
   end
 
   defp connect(%{method: method, location: location, body: body, headers: headers, options: options, pos_counter: pos} = state) do
@@ -226,9 +225,4 @@ defmodule Membrane.Element.HTTPoison.Source do
     end
   end
 
-  defp handle_ok_status(state) do
-    with {:ok, state} <- state |> stream_next,
-    do: {:ok, state},
-    else: ({:error, reason} -> {{:error, reason}, state})
-  end
 end
