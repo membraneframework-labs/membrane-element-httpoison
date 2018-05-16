@@ -11,25 +11,28 @@ Add the following line to your `deps` in `mix.exs`.  Run `mix deps.get`.
 {:membrane_element_httpoison, git: "git@github.com:membraneframework/membrane-element-httpoison.git"}
 ```
 
-Then add the following line to your `applications` in `mix.exs`.
-
-```elixir
-:membrane_element_httpoison
-```
-
 # Sample usage
 
-This should copy `httpoisons://en.wikipedia.org/wiki/Main_Page` to `./test`:
+This should get you a kitten from imgur and save as `kitty.jpg`.
 
 ```elixir
-{:ok, sink} = Membrane.Element.File.Sink.start_link(%Membrane.Element.File.SinkOptions{location: "./test"})
-Membrane.Element.play(sink)
+defmodule HTTPoison.Pipeline do
+  use Membrane.Pipeline
+  alias Pipeline.Spec
+  alias Membrane.Element.File
+  alias Membrane.Element.HTTPoison
 
-{:ok, source} = Membrane.Element.HTTPoison.Source.start_link(%Membrane.Element.HTTPoison.SourceOptions{location: "httpoisons://en.wikipedia.org/wiki/Main_Page"})
-Membrane.Element.link(source, sink)
-Membrane.Element.play(source)
+  @impl true
+  def handle_init(_) do
+    children = [
+      file_src: %HTTPoison.Source{location: "http://i.imgur.com/z4d4kWk.jpg"},
+      file_sink: %File.Sink{location: "kitty.jpg"},
+    ]
+    links = %{
+      {:file_src, :source} => {:file_sink, :sink}
+    }
+
+    {{:ok, %Spec{children: children, links: links}}, %{}}
+  end
+end
 ```
-
-# Authors
-
-Marcin Lewandowski
