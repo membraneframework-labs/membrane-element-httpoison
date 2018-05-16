@@ -7,8 +7,7 @@ defmodule Membrane.Element.HTTPoison.Source do
 
   def_options location: [
                 type: :string,
-                description: "The URL to fetch by the element",
-                regex: ~r[^(http|https)://.+$]
+                description: "The URL to fetch by the element"
               ],
               method: [
                 type: :atom,
@@ -41,33 +40,40 @@ defmodule Membrane.Element.HTTPoison.Source do
                 if the connection is broken.
                 """,
                 default: false
+              ],
+              is_live: [
+                type: :boolean,
+                description: """
+                Assume the source is live. When true, resume after error will not use `Range`
+                header to skip to the current position (in bytes).
+                """,
+                default: false
               ]
 
-  # Private API
+  @impl true
+  def handle_init(%__MODULE__{} = options) do
+    state =
+      options
+      |> Map.merge(%{
+        async_response: nil,
+        streaming: false,
+        pos_counter: 0,
+        playing: false
+      })
+
+    {:ok, state}
+  end
 
   @impl true
-  def handle_init(%__MODULE__{
-        method: method,
-        location: location,
-        headers: headers,
-        body: body,
-        options: options
-      }) do
-    {:ok,
-     %{
-       location: location,
-       method: method,
-       headers: headers,
-       body: body,
-       options: options,
-       async_response: nil,
-       streaming: false,
-       demand: 0,
-       type: nil,
-       pos_counter: 0,
-       playing: false
-     }}
+  def handle_prepare(:playing, %{async_response: response} = state) do
+    # transition from :playing to :prepared
+    if response != nil do
+      :hackney.close(response.id)
+    end
+    {:ok, %{state | playing: false, async_response: nil}}
   end
+
+  def handle_prepare(_, state), do: {:ok, state}
 
   @impl true
   def handle_play(state) do
@@ -75,23 +81,27 @@ defmodule Membrane.Element.HTTPoison.Source do
   end
 
   @impl true
-  def handle_prepare(:playing, state) do
-    {:ok, %{state | playing: false}}
+  def handle_demand(:source, _, _, _, %{streaming: true} = state) do
+    # We have already requested next frame (using HTTPoison.stream_next())
+    # so we do nothinig
+    {:ok, state}
   end
 
-  def handle_prepare(_, state), do: {:ok, state}
+  def handle_demand(:source, _, _, _, state) do
+    debug("HTTPoison: requesting next chunk")
 
-  @impl true
-  def handle_demand(:source, size, type, _, %{demand: demand, streaming: true} = state)
-      when type in [:buffers, :bytes] do
-    {:ok, %{state | demand: demand + size, type: type}}
-  end
+    with {:ok, resp} <- state.async_response |> HTTPoison.stream_next() do
+      {:ok, %{state | async_response: resp, streaming: true}}
+    else
+      {:error, reason} ->
+        warn_error("Http stream_next/1 error", {:stream_next, reason})
 
-  @impl true
-  def handle_demand(:source, size, type, _, %{demand: demand} = state)
-      when type in [:buffers, :bytes] do
-    state = %{state | demand: demand + size, type: type}
-    {:ok, state |> stream_next}
+        if state.resume_on_error do
+          %{state | streaming: false} |> connect(true)
+        else
+          {{:error, reason}, state}
+        end
+    end
   end
 
   @impl true
@@ -116,46 +126,44 @@ defmodule Membrane.Element.HTTPoison.Source do
 
   def handle_other(%HTTPoison.AsyncStatus{code: 200}, state) do
     debug("HTTPoison: Got 200 OK")
-    {:ok, state |> stream_next}
+    {{:ok, redemand: :source}, %{state | streaming: false}}
   end
 
   def handle_other(%HTTPoison.AsyncStatus{code: 206}, state) do
     debug("HTTPoison: Got 206 Partial Content")
-    {:ok, state |> stream_next}
+    {{:ok, redemand: :source}, %{state | streaming: false}}
   end
 
-  def handle_other(%HTTPoison.AsyncStatus{code: 416}, state) do
+  def handle_other(%HTTPoison.AsyncStatus{code: 416, id: id}, state) do
     warn("HTTPoison: Got 416 Invalid Range")
-    {{:ok, event: {:source, Event.eos()}}, %{state | streaming: false}}
+    :hackney.close(id)
+    {{:error, "Failed to make range request"}, %{state | streaming: false}}
   end
 
-  def handle_other(%HTTPoison.AsyncStatus{code: code}, state) do
+  def handle_other(%HTTPoison.AsyncStatus{code: code, id: id}, state) do
     warn("HTTPoison: Got unexpected status code #{code}")
-    {{:error, {:http_code, code}}, state}
+    :hackney.close(id)
+    {{:error, {:http_code, code}}, %{state | streaming: false}}
   end
 
   def handle_other(%HTTPoison.AsyncHeaders{headers: headers}, state) do
     debug("HTTPoison: Got headers #{inspect(headers)}")
-    {:ok, state |> stream_next}
+
+    {{:ok, redemand: :source}, %{state | streaming: false}}
   end
 
   def handle_other(%HTTPoison.AsyncChunk{}, %{playing: false} = state) do
+    # We received chunk after we stopped playing. We'll ignore that data.
     {:ok, %{state | streaming: false}}
   end
 
-  def handle_other(%HTTPoison.AsyncChunk{chunk: chunk}, %{type: type} = state) do
-    demand_update =
-      case type do
-        :buffers -> &(&1 - 1)
-        :bytes -> &((&1 - byte_size(chunk)) |> max(0))
-      end
-
+  def handle_other(%HTTPoison.AsyncChunk{chunk: chunk}, state) do
     state =
       state
       |> Map.update!(:pos_counter, &(&1 + byte_size(chunk)))
-      |> Map.update!(:demand, demand_update)
 
-    {{:ok, buffer: {:source, %Buffer{payload: chunk}}}, state |> stream_next}
+    actions = [buffer: {:source, %Buffer{payload: chunk}}, redemand: :source]
+    {{:ok, actions}, %{state | streaming: false}}
   end
 
   def handle_other(%HTTPoison.AsyncEnd{}, state) do
@@ -163,10 +171,14 @@ defmodule Membrane.Element.HTTPoison.Source do
     {{:ok, event: {:source, Event.eos()}}, %{state | streaming: false}}
   end
 
-  @doc false
-  def handle_other(%HTTPoison.Error{reason: reason}, state) do
-    warn("Error #{inspect(reason)}")
-    state |> connect
+  def handle_other(%HTTPoison.Error{reason: reason}, %{resume_on_error: resume} = state) do
+    warn("HTTPoison error #{inspect(reason)}")
+
+    if resume do
+      state |> connect(true)
+    else
+      {{:error, {:httpoison, reason}}, %{state | streaming: false}}
+    end
   end
 
   def handle_other(%HTTPoison.AsyncRedirect{headers: headers}, state) do
@@ -176,44 +188,28 @@ defmodule Membrane.Element.HTTPoison.Source do
       :no_location -> warn("HTTPoison: got redirect but without specyfying location")
     end
 
-    {:ok, state |> stream_next}
+    {{:ok, redemand: :source}, %{state | streaming: false}}
   end
 
-  def handle_other(:httpoison_stream_next, state) do
-    debug("HTTPoison: requesting next chunk")
+  defp connect(state, reconnect \\ false) do
+    %{
+      method: method,
+      location: location,
+      body: body,
+      headers: headers,
+      options: options,
+      pos_counter: pos,
+      is_live: is_live
+    } = state
 
-    with {:ok, resp} <- state.async_response |> HTTPoison.stream_next() do
-      {:ok, %{state | async_response: resp}}
-    else
-      {:error, reason} ->
-        warn_error("Http stream_next/1 error", {:stream_next, reason})
-        %{state | streaming: false} |> connect
-    end
-  end
-
-  defp stream_next(%{demand: demand, playing: playing} = state)
-       when demand <= 0 or not playing do
-    %{state | streaming: false}
-  end
-
-  defp stream_next(%{demand: demand} = state)
-       when demand > 0 do
-    send(self(), :httpoison_stream_next)
-    %{state | streaming: true}
-  end
-
-  defp connect(
-         %{
-           method: method,
-           location: location,
-           body: body,
-           headers: headers,
-           options: options,
-           pos_counter: pos
-         } = state
-       ) do
     options = options |> Keyword.merge(stream_to: self(), async: :once)
-    headers = [{"Range", "bytes=#{pos}-"} | headers]
+
+    headers =
+      if reconnect and is_live do
+        [{"Range", "bytes=#{pos}-"} | headers]
+      else
+        headers
+      end
 
     debug(
       "HTTPoison: connecting, request: #{inspect({method, location, body, headers, options})}"
