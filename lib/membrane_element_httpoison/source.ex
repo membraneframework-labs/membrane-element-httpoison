@@ -33,7 +33,7 @@ defmodule Membrane.Element.HTTPoison.Source do
                   "List of additional request headers in format accepted by `HTTPoison.request/5`",
                 default: []
               ],
-              options: [
+              poison_opts: [
                 type: :keyword,
                 description:
                   "Additional options to HTTPoison in format accepted by `HTTPoison.request/5`",
@@ -141,16 +141,24 @@ defmodule Membrane.Element.HTTPoison.Source do
     {{:ok, redemand: :source}, %{state | streaming: false}}
   end
 
-  def handle_other(%HTTPoison.AsyncStatus{code: 416, id: id}, state) do
-    warn("HTTPoison: Got 416 Invalid Range")
-    :hackney.close(id)
-    {{:error, "Failed to make range request"}, %{state | streaming: false}}
+  def handle_other(%HTTPoison.AsyncStatus{code: code}, state)
+      when code in [301, 302] do
+    warn("""
+    Got #{inspect(code)} status indicating redirection.
+    If you want to follow add `follow_redirect: true` to :poison_opts
+    """)
+
+    {{:error, {:httpoison, :redirect}}, state |> close_request()}
   end
 
-  def handle_other(%HTTPoison.AsyncStatus{code: code, id: id}, state) do
+  def handle_other(%HTTPoison.AsyncStatus{code: 416}, state) do
+    warn("HTTPoison: Got 416 Invalid Range")
+    {{:error, "Failed to make range request"}, state |> close_request()}
+  end
+
+  def handle_other(%HTTPoison.AsyncStatus{code: code}, state) do
     warn("HTTPoison: Got unexpected status code #{code}")
-    :hackney.close(id)
-    {{:error, {:http_code, code}}, %{state | streaming: false}}
+    {{:error, {:http_code, code}}, state |> close_request()}
   end
 
   def handle_other(%HTTPoison.AsyncHeaders{headers: headers}, state) do
@@ -184,18 +192,15 @@ defmodule Membrane.Element.HTTPoison.Source do
     if resume do
       state |> connect(true)
     else
-      {{:error, {:httpoison, reason}}, %{state | streaming: false}}
+      {{:error, {:httpoison, reason}}, state |> close_request()}
     end
   end
 
-  def handle_other(%HTTPoison.AsyncRedirect{headers: headers}, state) do
-    with {"Location", new_location} <- headers |> List.keyfind("Location", 0, :no_location) do
-      debug("HTTPoison: redirecting to #{new_location}")
-    else
-      :no_location -> warn("HTTPoison: got redirect but without specyfying location")
-    end
+  def handle_other(%HTTPoison.AsyncRedirect{to: new_location}, state) do
+    debug("HTTPoison: redirecting to #{new_location}")
 
-    {{:ok, redemand: :source}, %{state | streaming: false}}
+    %{state | location: new_location, streaming: false}
+    |> connect
   end
 
   defp connect(state, reconnect \\ false) do
@@ -204,12 +209,12 @@ defmodule Membrane.Element.HTTPoison.Source do
       location: location,
       body: body,
       headers: headers,
-      options: options,
+      poison_opts: opts,
       pos_counter: pos,
       is_live: is_live
     } = state
 
-    options = options |> Keyword.merge(stream_to: self(), async: :once)
+    opts = opts |> Keyword.merge(stream_to: self(), async: :once)
 
     headers =
       if reconnect and is_live do
@@ -219,13 +224,18 @@ defmodule Membrane.Element.HTTPoison.Source do
       end
 
     debug(
-      "HTTPoison: connecting, request: #{inspect({method, location, body, headers, options})}"
+      "HTTPoison: connecting, request: #{inspect({method, location, body, headers, opts})}"
     )
 
-    with {:ok, async_response} <- HTTPoison.request(method, location, body, headers, options) do
+    with {:ok, async_response} <- HTTPoison.request(method, location, body, headers, opts) do
       {:ok, %{state | async_response: async_response, streaming: true}}
     else
       {:error, reason} -> {{:error, {:httpoison, reason}}, state}
     end
+  end
+
+  defp close_request(%{async_response: resp} = state) do
+    :hackney.close(resp.id)
+    %{state | async_response: nil, streaming: false}
   end
 end
