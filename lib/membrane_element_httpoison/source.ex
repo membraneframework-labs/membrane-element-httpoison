@@ -1,4 +1,10 @@
 defmodule Membrane.Element.HTTPoison.Source do
+  @moduledoc """
+  This module HTTP source using HTTPoison library to make requests
+
+  It has an option to resume file download when an error occurrs.
+  Full list of options available via `options/0`
+  """
   use Membrane.Element.Base.Source
   use Membrane.Mixins.Log, tags: :membrane_element_httpoison
   alias Membrane.{Buffer, Event}
@@ -45,7 +51,7 @@ defmodule Membrane.Element.HTTPoison.Source do
                 type: :boolean,
                 description: """
                 Assume the source is live. When true, resume after error will not use `Range`
-                header to skip to the current position (in bytes).
+                header to skip to the current position in bytes.
                 """,
                 default: false
               ]
@@ -70,6 +76,7 @@ defmodule Membrane.Element.HTTPoison.Source do
     if response != nil do
       :hackney.close(response.id)
     end
+
     {:ok, %{state | playing: false, async_response: nil}}
   end
 
