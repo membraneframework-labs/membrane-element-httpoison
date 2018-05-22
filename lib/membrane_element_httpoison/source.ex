@@ -9,6 +9,9 @@ defmodule Membrane.Element.HTTPoison.Source do
   use Membrane.Mixins.Log, tags: :membrane_element_httpoison
   alias Membrane.{Buffer, Event}
 
+  @hackney Mockery.of(:hackney)
+  @httpoison Mockery.of(HTTPoison)
+
   def_known_source_pads source: {:always, :pull, :any}
 
   def_options location: [
@@ -74,7 +77,7 @@ defmodule Membrane.Element.HTTPoison.Source do
   def handle_prepare(:playing, %{async_response: response} = state) do
     # transition from :playing to :prepared
     if response != nil do
-      :hackney.close(response.id)
+      @hackney.close(response.id)
     end
 
     {:ok, %{state | playing: false, async_response: nil}}
@@ -97,16 +100,16 @@ defmodule Membrane.Element.HTTPoison.Source do
   def handle_demand(:source, _, _, _, state) do
     debug("HTTPoison: requesting next chunk")
 
-    with {:ok, resp} <- state.async_response |> HTTPoison.stream_next() do
+    with {:ok, resp} <- state.async_response |> @httpoison.stream_next() do
       {:ok, %{state | async_response: resp, streaming: true}}
     else
       {:error, reason} ->
-        warn_error("Http stream_next/1 error", {:stream_next, reason})
+        warn("HTTPoison.stream_next/1 error")
 
         if state.resume_on_error do
           %{state | streaming: false} |> connect(true)
         else
-          {{:error, reason}, state}
+          {{:error, {:stream_next, reason}}, state |> close_request()}
         end
     end
   end
@@ -153,7 +156,7 @@ defmodule Membrane.Element.HTTPoison.Source do
 
   def handle_other(%HTTPoison.AsyncStatus{code: 416}, state) do
     warn("HTTPoison: Got 416 Invalid Range")
-    {{:error, "Failed to make range request"}, state |> close_request()}
+    {{:error, {:httpoison, :invalid_range}}, state |> close_request()}
   end
 
   def handle_other(%HTTPoison.AsyncStatus{code: code}, state) do
@@ -183,7 +186,8 @@ defmodule Membrane.Element.HTTPoison.Source do
 
   def handle_other(%HTTPoison.AsyncEnd{}, state) do
     info("HTTPoison EOS")
-    {{:ok, event: {:source, Event.eos()}}, %{state | streaming: false}}
+    new_state = %{state | streaming: false, async_response: nil}
+    {{:ok, event: {:source, Event.eos()}}, new_state}
   end
 
   def handle_other(%HTTPoison.Error{reason: reason}, %{resume_on_error: resume} = state) do
@@ -217,7 +221,7 @@ defmodule Membrane.Element.HTTPoison.Source do
     opts = opts |> Keyword.merge(stream_to: self(), async: :once)
 
     headers =
-      if reconnect and is_live do
+      if reconnect and not is_live do
         [{"Range", "bytes=#{pos}-"} | headers]
       else
         headers
@@ -227,7 +231,7 @@ defmodule Membrane.Element.HTTPoison.Source do
       "HTTPoison: connecting, request: #{inspect({method, location, body, headers, opts})}"
     )
 
-    with {:ok, async_response} <- HTTPoison.request(method, location, body, headers, opts) do
+    with {:ok, async_response} <- @httpoison.request(method, location, body, headers, opts) do
       {:ok, %{state | async_response: async_response, streaming: true}}
     else
       {:error, reason} -> {{:error, {:httpoison, reason}}, state}
@@ -235,7 +239,7 @@ defmodule Membrane.Element.HTTPoison.Source do
   end
 
   defp close_request(%{async_response: resp} = state) do
-    :hackney.close(resp.id)
+    @hackney.close(resp.id)
     %{state | async_response: nil, streaming: false}
   end
 end
