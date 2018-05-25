@@ -25,11 +25,11 @@ defmodule HTTPoison.Pipeline do
   @impl true
   def handle_init(_) do
     children = [
-      file_src: %HTTPoison.Source{location: "http://i.imgur.com/z4d4kWk.jpg"},
+      httpoison_src: %HTTPoison.Source{location: "http://i.imgur.com/z4d4kWk.jpg"},
       file_sink: %File.Sink{location: "kitty.jpg"},
     ]
     links = %{
-      {:file_src, :source} => {:file_sink, :sink}
+      {:httpoison_src, :source} => {:file_sink, :sink}
     }
 
     {{:ok, %Spec{children: children, links: links}}, %{}}

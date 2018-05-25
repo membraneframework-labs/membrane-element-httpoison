@@ -76,11 +76,14 @@ defmodule Membrane.Element.HTTPoison.Source do
   @impl true
   def handle_prepare(:playing, %{async_response: response} = state) do
     # transition from :playing to :prepared
-    if response != nil do
-      @hackney.close(response.id)
-    end
+    state =
+      if response != nil do
+        state |> close_request()
+      else
+        state
+      end
 
-    {:ok, %{state | playing: false, async_response: nil}}
+    {:ok, %{state | playing: false}}
   end
 
   def handle_prepare(_, state), do: {:ok, state}

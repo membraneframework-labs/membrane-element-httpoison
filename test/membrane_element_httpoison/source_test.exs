@@ -173,7 +173,7 @@ defmodule Membrane.Element.HTTPoison.SourceTest do
       assert_called(:hackney, :close, [:ref])
     end
 
-    test "async status with unsupported should return error and close connection", %{
+    test "async status with unsupported code should return error and close connection", %{
       state_streaming: state
     } do
       mock(:hackney, [close: 1], :ok)
