@@ -227,9 +227,7 @@ defmodule Membrane.Element.HTTPoison.Source do
         headers
       end
 
-    debug(
-      "HTTPoison: connecting, request: #{inspect({method, location, body, headers, opts})}"
-    )
+    debug("HTTPoison: connecting, request: #{inspect({method, location, body, headers, opts})}")
 
     with {:ok, async_response} <- @httpoison.request(method, location, body, headers, opts) do
       {:ok, %{state | async_response: async_response, streaming: true}}
