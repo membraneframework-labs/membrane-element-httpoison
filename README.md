@@ -3,15 +3,17 @@
 This package provides elements that can be used to read files over HTTP using
 [HTTPoison](https://github.com/edgurgel/httpoison) library.
 
-# Installation
+It is part of [Membrane Multimedia Framework](https://membraneframework.org).
+
+## Installation
 
 Add the following line to your `deps` in `mix.exs`.  Run `mix deps.get`.
 
 ```elixir
-{:membrane_element_httpoison, git: "git@github.com:membraneframework/membrane-element-httpoison.git"}
+{:membrane_element_httpoison, "~> 0.1"}
 ```
 
-# Sample usage
+## Sample usage
 
 This should get you a kitten from imgur and save as `kitty.jpg`.
 

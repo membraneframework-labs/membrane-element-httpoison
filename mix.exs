@@ -12,7 +12,7 @@ defmodule Membrane.Element.HTTPoison.Mixfile do
       package: package(),
       name: "Membrane Element: HTTPoison",
       source_url: link(),
-      homepage_url: "https://membraneframework.org",
+      docs: docs(),
       deps: deps()
     ]
   end
@@ -31,19 +31,29 @@ defmodule Membrane.Element.HTTPoison.Mixfile do
     "http://github.com/membraneframework/membrane-element-httpoison"
   end
 
+  defp docs do
+    [
+      main: "readme",
+      extras: ["README.md"]
+    ]
+  end
+
   defp package do
     [
       maintainers: ["Membrane Team"],
       licenses: ["Apache 2.0"],
-      links: %{"GitHub" => link()}
+      links: %{
+        "GitHub" => link(),
+        "Membrane Framework Homepage" => "https://membraneframework.org"
+      }
     ]
   end
 
   defp deps do
     [
       {:ex_doc, "~> 0.18", only: :dev, runtime: false},
-      {:membrane_core, git: "git@github.com:membraneframework/membrane-core.git"},
       {:mockery, "~> 2.1", runtime: false},
+      {:membrane_core, "~> 0.1"},
       {:httpoison, "~> 1.1.0"}
     ]
   end
