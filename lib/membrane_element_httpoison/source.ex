@@ -6,13 +6,11 @@ defmodule Membrane.Element.HTTPoison.Source do
   Full list of options available via `options/0`
   """
   use Membrane.Element.Base.Source
-  use Membrane.Mixins.Log, tags: :membrane_element_httpoison
+  use Membrane.Log, tags: :membrane_element_httpoison
   alias Membrane.{Buffer, Event}
+  import Mockery.Macro
 
-  @hackney Mockery.of(:hackney)
-  @httpoison Mockery.of(HTTPoison)
-
-  def_known_source_pads source: {:always, :pull, :any}
+  def_output_pads output: [caps: :any]
 
   def_options location: [
                 type: :string,
@@ -74,8 +72,7 @@ defmodule Membrane.Element.HTTPoison.Source do
   end
 
   @impl true
-  def handle_prepare(:playing, %{async_response: response} = state) do
-    # transition from :playing to :prepared
+  def handle_playing_to_prepared(_ctx, %{async_response: response} = state) do
     state =
       if response != nil do
         state |> close_request()
@@ -86,24 +83,22 @@ defmodule Membrane.Element.HTTPoison.Source do
     {:ok, %{state | playing: false}}
   end
 
-  def handle_prepare(_, state), do: {:ok, state}
-
   @impl true
-  def handle_play(state) do
+  def handle_prepared_to_playing(_ctx, state) do
     %{state | playing: true} |> connect
   end
 
   @impl true
-  def handle_demand(:source, _, _, _, %{streaming: true} = state) do
+  def handle_demand(:output, _, _, _, %{streaming: true} = state) do
     # We have already requested next frame (using HTTPoison.stream_next())
     # so we do nothinig
     {:ok, state}
   end
 
-  def handle_demand(:source, _, _, _, state) do
+  def handle_demand(:output, _, _, _, state) do
     debug("HTTPoison: requesting next chunk")
 
-    with {:ok, resp} <- state.async_response |> @httpoison.stream_next() do
+    with {:ok, resp} <- state.async_response |> mockable(HTTPoison).stream_next() do
       {:ok, %{state | async_response: resp, streaming: true}}
     else
       {:error, reason} ->
@@ -118,7 +113,7 @@ defmodule Membrane.Element.HTTPoison.Source do
   end
 
   @impl true
-  def handle_other(%struct{id: msg_id} = msg, %{async_response: %{id: id}} = state)
+  def handle_other(%struct{id: msg_id} = msg, _ctx, %{async_response: %{id: id}} = state)
       when msg_id != id and
              struct in [
                HTTPoison.AsyncChunk,
@@ -137,17 +132,17 @@ defmodule Membrane.Element.HTTPoison.Source do
     {:ok, state}
   end
 
-  def handle_other(%HTTPoison.AsyncStatus{code: 200}, state) do
+  def handle_other(%HTTPoison.AsyncStatus{code: 200}, _ctx, state) do
     debug("HTTPoison: Got 200 OK")
-    {{:ok, redemand: :source}, %{state | streaming: false}}
+    {{:ok, redemand: :output}, %{state | streaming: false}}
   end
 
-  def handle_other(%HTTPoison.AsyncStatus{code: 206}, state) do
+  def handle_other(%HTTPoison.AsyncStatus{code: 206}, _ctx, state) do
     debug("HTTPoison: Got 206 Partial Content")
-    {{:ok, redemand: :source}, %{state | streaming: false}}
+    {{:ok, redemand: :output}, %{state | streaming: false}}
   end
 
-  def handle_other(%HTTPoison.AsyncStatus{code: code}, state)
+  def handle_other(%HTTPoison.AsyncStatus{code: code}, _ctx, state)
       when code in [301, 302] do
     warn("""
     Got #{inspect(code)} status indicating redirection.
@@ -157,43 +152,43 @@ defmodule Membrane.Element.HTTPoison.Source do
     {{:error, {:httpoison, :redirect}}, state |> close_request()}
   end
 
-  def handle_other(%HTTPoison.AsyncStatus{code: 416}, state) do
+  def handle_other(%HTTPoison.AsyncStatus{code: 416}, _ctx, state) do
     warn("HTTPoison: Got 416 Invalid Range")
     {{:error, {:httpoison, :invalid_range}}, state |> close_request()}
   end
 
-  def handle_other(%HTTPoison.AsyncStatus{code: code}, state) do
+  def handle_other(%HTTPoison.AsyncStatus{code: code}, _ctx, state) do
     warn("HTTPoison: Got unexpected status code #{code}")
     {{:error, {:http_code, code}}, state |> close_request()}
   end
 
-  def handle_other(%HTTPoison.AsyncHeaders{headers: headers}, state) do
+  def handle_other(%HTTPoison.AsyncHeaders{headers: headers}, _ctx, state) do
     debug("HTTPoison: Got headers #{inspect(headers)}")
 
-    {{:ok, redemand: :source}, %{state | streaming: false}}
+    {{:ok, redemand: :output}, %{state | streaming: false}}
   end
 
-  def handle_other(%HTTPoison.AsyncChunk{}, %{playing: false} = state) do
+  def handle_other(%HTTPoison.AsyncChunk{}, _ctx, %{playing: false} = state) do
     # We received chunk after we stopped playing. We'll ignore that data.
     {:ok, %{state | streaming: false}}
   end
 
-  def handle_other(%HTTPoison.AsyncChunk{chunk: chunk}, state) do
+  def handle_other(%HTTPoison.AsyncChunk{chunk: chunk}, _ctx, state) do
     state =
       state
       |> Map.update!(:pos_counter, &(&1 + byte_size(chunk)))
 
-    actions = [buffer: {:source, %Buffer{payload: chunk}}, redemand: :source]
+    actions = [buffer: {:output, %Buffer{payload: chunk}}, redemand: :output]
     {{:ok, actions}, %{state | streaming: false}}
   end
 
-  def handle_other(%HTTPoison.AsyncEnd{}, state) do
+  def handle_other(%HTTPoison.AsyncEnd{}, _ctx, state) do
     info("HTTPoison EOS")
     new_state = %{state | streaming: false, async_response: nil}
-    {{:ok, event: {:source, Event.eos()}}, new_state}
+    {{:ok, event: {:output, %Event.EndOfStream{}}}, new_state}
   end
 
-  def handle_other(%HTTPoison.Error{reason: reason}, %{resume_on_error: resume} = state) do
+  def handle_other(%HTTPoison.Error{reason: reason}, _ctx, %{resume_on_error: resume} = state) do
     warn("HTTPoison error #{inspect(reason)}")
 
     if resume do
@@ -203,7 +198,7 @@ defmodule Membrane.Element.HTTPoison.Source do
     end
   end
 
-  def handle_other(%HTTPoison.AsyncRedirect{to: new_location}, state) do
+  def handle_other(%HTTPoison.AsyncRedirect{to: new_location}, _ctx, state) do
     debug("HTTPoison: redirecting to #{new_location}")
 
     %{state | location: new_location, streaming: false}
@@ -232,7 +227,8 @@ defmodule Membrane.Element.HTTPoison.Source do
 
     debug("HTTPoison: connecting, request: #{inspect({method, location, body, headers, opts})}")
 
-    with {:ok, async_response} <- @httpoison.request(method, location, body, headers, opts) do
+    with {:ok, async_response} <-
+           mockable(HTTPoison).request(method, location, body, headers, opts) do
       {:ok, %{state | async_response: async_response, streaming: true}}
     else
       {:error, reason} -> {{:error, {:httpoison, reason}}, state}
@@ -240,7 +236,7 @@ defmodule Membrane.Element.HTTPoison.Source do
   end
 
   defp close_request(%{async_response: resp} = state) do
-    @hackney.close(resp.id)
+    mockable(:hackney).close(resp.id)
     %{state | async_response: nil, streaming: false}
   end
 end
