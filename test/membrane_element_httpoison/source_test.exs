@@ -2,6 +2,7 @@ defmodule Membrane.Element.HTTPoison.SourceTest do
   @moduledoc false
   use ExUnit.Case, async: true
   use Mockery
+  alias Membrane.Element.CallbackContext, as: Ctx
 
   @module Membrane.Element.HTTPoison.Source
 
@@ -15,19 +16,19 @@ defmodule Membrane.Element.HTTPoison.SourceTest do
     resume_on_error: false,
     async_response: nil,
     streaming: false,
-    pos_counter: 0,
-    playing: false
+    pos_counter: 0
   }
 
   @mock_response %HTTPoison.AsyncResponse{id: :ref}
+
+  @ctx_other_pl %Ctx.Other{playback_state: :playing, pads: %{}}
 
   def state_streaming(_) do
     state =
       @default_state
       |> Map.merge(%{
         streaming: true,
-        async_response: @mock_response,
-        playing: true
+        async_response: @mock_response
       })
 
     [state_streaming: state]
@@ -37,7 +38,6 @@ defmodule Membrane.Element.HTTPoison.SourceTest do
     state = %{@default_state | async_response: @mock_response}
     mock(:hackney, close: 1)
     assert {:ok, new_state} = @module.handle_playing_to_prepared(nil, state)
-    assert new_state.playing == false
     assert new_state.async_response == nil
     assert_called(:hackney, :close, [:ref])
   end
@@ -60,7 +60,6 @@ defmodule Membrane.Element.HTTPoison.SourceTest do
       })
 
     assert {:ok, new_state} = @module.handle_prepared_to_playing(nil, state)
-    assert new_state.playing == true
     assert new_state.async_response == @mock_response
     assert new_state.streaming == true
 
@@ -115,7 +114,7 @@ defmodule Membrane.Element.HTTPoison.SourceTest do
   end
 
   def test_msg_trigger_redemand(msg, state) do
-    assert {{:ok, actions}, new_state} = @module.handle_other(msg, nil, state)
+    assert {{:ok, actions}, new_state} = @module.handle_other(msg, @ctx_other_pl, state)
     assert actions == [redemand: :output]
     assert new_state.streaming == false
   end
@@ -140,7 +139,7 @@ defmodule Membrane.Element.HTTPoison.SourceTest do
     test "async status 301 should return error and close connection", %{state_streaming: state} do
       msg = %HTTPoison.AsyncStatus{code: 301, id: :ref}
       mock(:hackney, [close: 1], :ok)
-      assert {{:error, reason}, new_state} = @module.handle_other(msg, nil, state)
+      assert {{:error, reason}, new_state} = @module.handle_other(msg, @ctx_other_pl, state)
       assert reason == {:httpoison, :redirect}
       assert new_state.streaming == false
       assert new_state.async_response == nil
@@ -152,7 +151,7 @@ defmodule Membrane.Element.HTTPoison.SourceTest do
     } do
       msg = %HTTPoison.AsyncStatus{code: 302, id: :ref}
       mock(:hackney, [close: 1], :ok)
-      assert {{:error, reason}, new_state} = @module.handle_other(msg, nil, state)
+      assert {{:error, reason}, new_state} = @module.handle_other(msg, @ctx_other_pl, state)
       assert reason == {:httpoison, :redirect}
       assert new_state.streaming == false
       assert new_state.async_response == nil
@@ -164,7 +163,7 @@ defmodule Membrane.Element.HTTPoison.SourceTest do
     } do
       msg = %HTTPoison.AsyncStatus{code: 416, id: :ref}
       mock(:hackney, [close: 1], :ok)
-      assert {{:error, reason}, new_state} = @module.handle_other(msg, nil, state)
+      assert {{:error, reason}, new_state} = @module.handle_other(msg, @ctx_other_pl, state)
       assert reason == {:httpoison, :invalid_range}
       assert new_state.streaming == false
       assert new_state.async_response == nil
@@ -180,7 +179,7 @@ defmodule Membrane.Element.HTTPoison.SourceTest do
       codes
       |> Enum.each(fn code ->
         msg = %HTTPoison.AsyncStatus{code: code, id: :ref}
-        assert {{:error, reason}, new_state} = @module.handle_other(msg, nil, state)
+        assert {{:error, reason}, new_state} = @module.handle_other(msg, @ctx_other_pl, state)
         assert reason == {:http_code, code}
         assert new_state.streaming == false
         assert new_state.async_response == nil
@@ -195,9 +194,9 @@ defmodule Membrane.Element.HTTPoison.SourceTest do
     end
 
     test "async chunk when not playing should ignore the data", %{state_streaming: state} do
-      state = %{state | playing: false}
       msg = %HTTPoison.AsyncChunk{chunk: <<>>, id: :ref}
-      assert {:ok, new_state} = @module.handle_other(msg, nil, state)
+      ctx = %Ctx.Other{playback_state: :prepared, pads: %{}}
+      assert {:ok, new_state} = @module.handle_other(msg, ctx, state)
       assert new_state.streaming == false
     end
 
@@ -205,7 +204,7 @@ defmodule Membrane.Element.HTTPoison.SourceTest do
       state_streaming: state
     } do
       msg = %HTTPoison.AsyncChunk{chunk: <<1, 2, 3>>, id: :ref}
-      assert {{:ok, actions}, new_state} = @module.handle_other(msg, nil, state)
+      assert {{:ok, actions}, new_state} = @module.handle_other(msg, @ctx_other_pl, state)
 
       assert [buffer: buf_action, redemand: :output] = actions
       assert buf_action == {:output, %Membrane.Buffer{payload: <<1, 2, 3>>}}
@@ -218,7 +217,7 @@ defmodule Membrane.Element.HTTPoison.SourceTest do
       state_streaming: state
     } do
       msg = %HTTPoison.AsyncEnd{id: :ref}
-      assert {{:ok, actions}, new_state} = @module.handle_other(msg, nil, state)
+      assert {{:ok, actions}, new_state} = @module.handle_other(msg, @ctx_other_pl, state)
       assert actions == [event: {:output, %Membrane.Event.EndOfStream{}}]
       assert new_state.async_response == nil
       assert new_state.streaming == false
@@ -227,7 +226,7 @@ defmodule Membrane.Element.HTTPoison.SourceTest do
     test "HTTPoison error should return error and close request", %{state_streaming: state} do
       mock(:hackney, [close: 1], :ok)
       msg = %HTTPoison.Error{reason: :reason, id: :ref}
-      assert {{:error, reason}, new_state} = @module.handle_other(msg, nil, state)
+      assert {{:error, reason}, new_state} = @module.handle_other(msg, @ctx_other_pl, state)
       assert reason == {:httpoison, :reason}
       assert new_state.streaming == false
       assert new_state.async_response == nil
@@ -249,7 +248,7 @@ defmodule Membrane.Element.HTTPoison.SourceTest do
         })
 
       msg = %HTTPoison.AsyncRedirect{to: "url2", id: :ref}
-      assert {:ok, new_state} = @module.handle_other(msg, nil, state)
+      assert {:ok, new_state} = @module.handle_other(msg, @ctx_other_pl, state)
       assert new_state.location == "url2"
       assert new_state.async_response == second_response
       assert new_state.streaming == true
@@ -318,7 +317,7 @@ defmodule Membrane.Element.HTTPoison.SourceTest do
     test "handle_other should reconnect on error starting from current position", ctx do
       test_reconnect(ctx, fn state ->
         msg = %HTTPoison.Error{reason: :reason, id: :ref}
-        @module.handle_other(msg, nil, state)
+        @module.handle_other(msg, @ctx_other_pl, state)
       end)
     end
   end
@@ -355,7 +354,7 @@ defmodule Membrane.Element.HTTPoison.SourceTest do
     test "handle_other", ctx do
       test_reconnect(ctx, fn state ->
         msg = %HTTPoison.Error{reason: :reason, id: :ref}
-        @module.handle_other(msg, nil, state)
+        @module.handle_other(msg, @ctx_other_pl, state)
       end)
     end
   end

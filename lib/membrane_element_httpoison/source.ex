@@ -64,8 +64,7 @@ defmodule Membrane.Element.HTTPoison.Source do
       |> Map.merge(%{
         async_response: nil,
         streaming: false,
-        pos_counter: 0,
-        playing: false
+        pos_counter: 0
       })
 
     {:ok, state}
@@ -80,22 +79,22 @@ defmodule Membrane.Element.HTTPoison.Source do
         state
       end
 
-    {:ok, %{state | playing: false}}
+    {:ok, state}
   end
 
   @impl true
   def handle_prepared_to_playing(_ctx, state) do
-    %{state | playing: true} |> connect
+    state |> connect
   end
 
   @impl true
-  def handle_demand(:output, _, _, _, %{streaming: true} = state) do
+  def handle_demand(:output, _size, _unit, _ctx, %{streaming: true} = state) do
     # We have already requested next frame (using HTTPoison.stream_next())
     # so we do nothinig
     {:ok, state}
   end
 
-  def handle_demand(:output, _, _, _, state) do
+  def handle_demand(:output, _size, _unit, _ctx, state) do
     debug("HTTPoison: requesting next chunk")
 
     with {:ok, resp} <- state.async_response |> mockable(HTTPoison).stream_next() do
@@ -168,18 +167,22 @@ defmodule Membrane.Element.HTTPoison.Source do
     {{:ok, redemand: :output}, %{state | streaming: false}}
   end
 
-  def handle_other(%HTTPoison.AsyncChunk{}, _ctx, %{playing: false} = state) do
-    # We received chunk after we stopped playing. We'll ignore that data.
-    {:ok, %{state | streaming: false}}
-  end
-
-  def handle_other(%HTTPoison.AsyncChunk{chunk: chunk}, _ctx, state) do
+  def handle_other(
+        %HTTPoison.AsyncChunk{chunk: chunk},
+        %Ctx.Other{playback_state: :playing},
+        state
+      ) do
     state =
       state
       |> Map.update!(:pos_counter, &(&1 + byte_size(chunk)))
 
     actions = [buffer: {:output, %Buffer{payload: chunk}}, redemand: :output]
     {{:ok, actions}, %{state | streaming: false}}
+  end
+
+  def handle_other(%HTTPoison.AsyncChunk{}, _ctx, state) do
+    # We received chunk after we've stopped playing. We'll ignore that data.
+    {:ok, %{state | streaming: false}}
   end
 
   def handle_other(%HTTPoison.AsyncEnd{}, _ctx, state) do
