@@ -1,9 +1,10 @@
 defmodule Membrane.Element.HTTPoison.Source do
   @moduledoc """
-  This module HTTP source using HTTPoison library to make requests
+  This module provides a source element allowing you to receive data as a client
+  using HTTP. It is based upon [HTTPoison](https://github.com/edgurgel/httpoison)
+  library that is responsible for making HTTP requests.
 
-  It has an option to resume file download when an error occurrs.
-  Full list of options available via `options/0`
+  See the `t:t/0` for the available configuration options.
   """
   use Membrane.Element.Base.Source
   use Membrane.Log, tags: :membrane_element_httpoison
@@ -19,12 +20,12 @@ defmodule Membrane.Element.HTTPoison.Source do
               method: [
                 type: :atom,
                 spec: :get | :post | :put | :patch | :delete | :head | :options,
-                description: "HTTP method to use",
+                description: "HTTP method that will be used when making a request",
                 default: :get
               ],
               body: [
                 type: :string,
-                description: "Request body",
+                description: "The request body",
                 default: ""
               ],
               headers: [
@@ -37,7 +38,7 @@ defmodule Membrane.Element.HTTPoison.Source do
               poison_opts: [
                 type: :keyword,
                 description:
-                  "Additional options to HTTPoison in format accepted by `HTTPoison.request/5`",
+                  "Additional options for HTTPoison in format accepted by `HTTPoison.request/5`",
                 default: []
               ],
               resume_on_error: [
@@ -51,8 +52,9 @@ defmodule Membrane.Element.HTTPoison.Source do
               is_live: [
                 type: :boolean,
                 description: """
-                Assume the source is live. When true, resume after error will not use `Range`
-                header to skip to the current position in bytes.
+                Assume the source is live. If true, when resuming after error,
+                the element will not use `Range` header to skip to the
+                current position in bytes.
                 """,
                 default: false
               ]
