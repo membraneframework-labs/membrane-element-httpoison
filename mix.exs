@@ -1,17 +1,20 @@
 defmodule Membrane.Element.HTTPoison.Mixfile do
   use Mix.Project
 
+  @version "0.1.1"
+  @github_url "http://github.com/membraneframework/membrane-element-httpoison"
+
   def project do
     [
       app: :membrane_element_httpoison,
       compilers: Mix.compilers(),
-      version: "0.1.0",
-      elixir: "~> 1.6",
+      version: @version,
+      elixir: "~> 1.7",
       elixirc_paths: elixirc_paths(Mix.env()),
       description: "Membrane Multimedia Framework (HTTPoison Element)",
       package: package(),
       name: "Membrane Element: HTTPoison",
-      source_url: link(),
+      source_url: @github_url,
       docs: docs(),
       deps: deps()
     ]
@@ -27,14 +30,11 @@ defmodule Membrane.Element.HTTPoison.Mixfile do
   defp elixirc_paths(:test), do: ["lib", "spec/support"]
   defp elixirc_paths(_), do: ["lib"]
 
-  defp link do
-    "http://github.com/membraneframework/membrane-element-httpoison"
-  end
-
   defp docs do
     [
       main: "readme",
-      extras: ["README.md"]
+      extras: ["README.md"],
+      source_ref: "v#{@version}"
     ]
   end
 
@@ -43,7 +43,7 @@ defmodule Membrane.Element.HTTPoison.Mixfile do
       maintainers: ["Membrane Team"],
       licenses: ["Apache 2.0"],
       links: %{
-        "GitHub" => link(),
+        "GitHub" => @github_url,
         "Membrane Framework Homepage" => "https://membraneframework.org"
       }
     ]
@@ -51,10 +51,10 @@ defmodule Membrane.Element.HTTPoison.Mixfile do
 
   defp deps do
     [
-      {:ex_doc, "~> 0.18", only: :dev, runtime: false},
+      {:ex_doc, "~> 0.19", only: :dev, runtime: false},
       {:mockery, "~> 2.1", runtime: false},
-      {:membrane_core, "~> 0.1"},
-      {:httpoison, "~> 1.1.0"}
+      {:membrane_core, "~> 0.2.0-dev", github: "membraneframework/membrane-core"},
+      {:httpoison, "~> 1.1"}
     ]
   end
 end
