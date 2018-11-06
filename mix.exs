@@ -1,7 +1,7 @@
 defmodule Membrane.Element.HTTPoison.Mixfile do
   use Mix.Project
 
-  @version "0.1.1"
+  @version "0.2.0"
   @github_url "http://github.com/membraneframework/membrane-element-httpoison"
 
   def project do
@@ -53,7 +53,7 @@ defmodule Membrane.Element.HTTPoison.Mixfile do
     [
       {:ex_doc, "~> 0.19", only: :dev, runtime: false},
       {:mockery, "~> 2.1", runtime: false},
-      {:membrane_core, "~> 0.2.0-dev", github: "membraneframework/membrane-core"},
+      {:membrane_core, "~> 0.2.0"},
       {:httpoison, "~> 1.1"}
     ]
   end
