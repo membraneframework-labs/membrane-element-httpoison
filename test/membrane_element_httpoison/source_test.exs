@@ -13,7 +13,8 @@ defmodule Membrane.Element.HTTPoison.SourceTest do
     location: "url",
     method: :get,
     poison_opts: [],
-    resume_on_error: false,
+    retries: 0,
+    max_retries: 0,
     async_response: nil,
     streaming: false,
     pos_counter: 0
@@ -267,7 +268,7 @@ defmodule Membrane.Element.HTTPoison.SourceTest do
     state =
       @default_state
       |> Map.merge(%{
-        resume_on_error: true,
+        max_retries: 1,
         async_response: @mock_response,
         pos_counter: 42
       })
@@ -284,6 +285,7 @@ defmodule Membrane.Element.HTTPoison.SourceTest do
       expected_headers: expected_headers
     } = ctx
 
+    mock(:hackney, [close: 1], :ok)
     mock(HTTPoison, [request: 5], {:ok, ctx.second_response})
 
     assert {:ok, new_state} = tested_call.(state)
@@ -297,9 +299,11 @@ defmodule Membrane.Element.HTTPoison.SourceTest do
       ^expected_headers,
       [stream_to: _, async: :once]
     ])
+
+    assert_called(:hackney, :close, [:ref])
   end
 
-  describe "with resume_on_error: true in options" do
+  describe "with max_retries = 1 in options" do
     setup :state_resume_not_live
 
     test "handle_demand should reconnect on error starting from current position", ctx do
@@ -326,7 +330,7 @@ defmodule Membrane.Element.HTTPoison.SourceTest do
     state =
       @default_state
       |> Map.merge(%{
-        resume_on_error: true,
+        max_retries: 1,
         is_live: true,
         async_response: @mock_response,
         pos_counter: 42
@@ -336,7 +340,7 @@ defmodule Membrane.Element.HTTPoison.SourceTest do
     [state: state, second_response: second_response, expected_headers: []]
   end
 
-  describe "with resume_on_error: true and is_live: true in options" do
+  describe "with max_retries = 1 and is_live: true in options" do
     setup :state_resume_live
 
     test "handle_demand should reconnect on error", ctx do
