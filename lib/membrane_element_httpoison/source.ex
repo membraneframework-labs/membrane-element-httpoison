@@ -104,6 +104,11 @@ defmodule Membrane.Element.HTTPoison.Source do
     {:ok, state}
   end
 
+  def handle_demand(:output, _size, _unit, _ctx, %{async_response: nil} = state) do
+    # We're waiting for reconnect
+    {:ok, state}
+  end
+
   def handle_demand(:output, _size, _unit, _ctx, state) do
     debug("HTTPoison: requesting next chunk")
 
@@ -158,7 +163,7 @@ defmodule Membrane.Element.HTTPoison.Source do
   end
 
   def handle_other(%HTTPoison.AsyncStatus{code: 416}, _ctx, state) do
-    warn("HTTPoison: Got 416 Invalid Range")
+    warn("HTTPoison: Got 416 Invalid Range (pos_counter is #{inspect(state.pos_counter)})")
     retry({:httpoison, :invalid_range}, state |> close_request())
   end
 
@@ -227,9 +232,9 @@ defmodule Membrane.Element.HTTPoison.Source do
     connect(%{state | retries: state.retries + 1})
   end
 
-  defp retry(_reason, %{retry_delay: delay} = state, true) do
+  defp retry(_reason, %{retry_delay: delay, retries: retries} = state, true) do
     Process.send_after(self(), :reconnect, delay |> Time.to_milliseconds())
-    {:ok, %{state | retries: state.retries + 1}}
+    {:ok, %{state | retries: retries + 1}}
   end
 
   defp connect(state) do
@@ -260,6 +265,10 @@ defmodule Membrane.Element.HTTPoison.Source do
     else
       {:error, reason} -> retry({:httpoison, reason}, state)
     end
+  end
+
+  defp close_request(%{async_response: nil} = state) do
+    %{state | streaming: false}
   end
 
   defp close_request(%{async_response: resp} = state) do
