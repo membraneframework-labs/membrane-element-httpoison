@@ -15,6 +15,7 @@ defmodule Membrane.Element.HTTPoison.SourceTest do
     poison_opts: [],
     retries: 0,
     max_retries: 0,
+    retry_delay: 1 |> Membrane.Time.millisecond(),
     async_response: nil,
     streaming: false,
     pos_counter: 0
@@ -318,11 +319,12 @@ defmodule Membrane.Element.HTTPoison.SourceTest do
       assert_called(HTTPoison, :stream_next, [^pin_response])
     end
 
-    test "handle_other should reconnect on error starting from current position", ctx do
-      test_reconnect(ctx, fn state ->
-        msg = %HTTPoison.Error{reason: :reason, id: :ref}
-        @module.handle_other(msg, @ctx_other_pl, state)
-      end)
+    test "handle_other should send :reconnect on error", %{state: state} do
+      msg = %HTTPoison.Error{reason: :reason, id: :ref}
+      mock(:hackney, [close: 1], :ok)
+      assert {:ok, new_state} = @module.handle_other(msg, @ctx_other_pl, state)
+      assert new_state.retries == state.retries + 1
+      assert_receive :reconnect
     end
   end
 
@@ -355,11 +357,12 @@ defmodule Membrane.Element.HTTPoison.SourceTest do
       assert_called(HTTPoison, :stream_next, [^pin_response])
     end
 
-    test "handle_other", ctx do
-      test_reconnect(ctx, fn state ->
-        msg = %HTTPoison.Error{reason: :reason, id: :ref}
-        @module.handle_other(msg, @ctx_other_pl, state)
-      end)
+    test "handle_other", %{state: state} do
+      msg = %HTTPoison.Error{reason: :reason, id: :ref}
+      mock(:hackney, [close: 1], :ok)
+      assert {:ok, new_state} = @module.handle_other(msg, @ctx_other_pl, state)
+      assert new_state.retries == state.retries + 1
+      assert_receive :reconnect
     end
   end
 end

@@ -118,6 +118,8 @@ defmodule Membrane.Element.HTTPoison.Source do
       {:error, reason} ->
         warn("HTTPoison.stream_next/1 error: #{inspect(reason)}")
 
+        # Retry without delay - we will either sucessfully reconnect
+        # or will get an error resulting in retry with delay
         retry({:stream_next, reason}, state |> close_request(), false)
     end
   end
@@ -144,12 +146,12 @@ defmodule Membrane.Element.HTTPoison.Source do
 
   def handle_other(%HTTPoison.AsyncStatus{code: 200}, _ctx, state) do
     debug("HTTPoison: Got 200 OK")
-    {{:ok, redemand: :output}, %{state | streaming: false}}
+    {{:ok, redemand: :output}, %{state | streaming: false, retries: 0}}
   end
 
   def handle_other(%HTTPoison.AsyncStatus{code: 206}, _ctx, state) do
     debug("HTTPoison: Got 206 Partial Content")
-    {{:ok, redemand: :output}, %{state | streaming: false}}
+    {{:ok, redemand: :output}, %{state | streaming: false, retries: 0}}
   end
 
   def handle_other(%HTTPoison.AsyncStatus{code: code}, _ctx, state)
@@ -205,7 +207,7 @@ defmodule Membrane.Element.HTTPoison.Source do
   def handle_other(%HTTPoison.Error{reason: reason}, _ctx, state) do
     warn("HTTPoison error #{inspect(reason)}")
 
-    retry({:httpoison, reason}, state |> close_request(), false)
+    retry({:httpoison, reason}, state |> close_request())
   end
 
   def handle_other(%HTTPoison.AsyncRedirect{to: new_location}, _ctx, state) do
