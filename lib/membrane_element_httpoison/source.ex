@@ -8,7 +8,7 @@ defmodule Membrane.Element.HTTPoison.Source do
   """
   use Membrane.Element.Base.Source
   use Membrane.Log, tags: :membrane_element_httpoison
-  alias Membrane.{Buffer, Event}
+  alias Membrane.{Buffer, Event, Element, Time}
   import Mockery.Macro
 
   def_output_pads output: [caps: :any]
@@ -41,13 +41,20 @@ defmodule Membrane.Element.HTTPoison.Source do
                   "Additional options for HTTPoison in format accepted by `HTTPoison.request/5`",
                 default: []
               ],
-              resume_on_error: [
-                type: :boolean,
+              max_retries: [
+                type: :integer,
+                spec: non_neg_integer() | :infinity,
                 description: """
-                If set to true, the element will try to automatically resume the download (from proper position)
-                if the connection is broken.
+                Maximum number of retries before returning an error. Can be set to `:infinity`.
                 """,
-                default: false
+                default: 0
+              ],
+              retry_delay: [
+                type: :time,
+                description: """
+                Delay between reconnection attempts in case of connection error.
+                """,
+                default: 200 |> Time.millisecond()
               ],
               is_live: [
                 type: :boolean,
@@ -65,6 +72,7 @@ defmodule Membrane.Element.HTTPoison.Source do
       options
       |> Map.merge(%{
         async_response: nil,
+        retries: 0,
         streaming: false,
         pos_counter: 0
       })
@@ -96,6 +104,11 @@ defmodule Membrane.Element.HTTPoison.Source do
     {:ok, state}
   end
 
+  def handle_demand(:output, _size, _unit, _ctx, %{async_response: nil} = state) do
+    # We're waiting for reconnect
+    {:ok, state}
+  end
+
   def handle_demand(:output, _size, _unit, _ctx, state) do
     debug("HTTPoison: requesting next chunk")
 
@@ -103,13 +116,12 @@ defmodule Membrane.Element.HTTPoison.Source do
       {:ok, %{state | async_response: resp, streaming: true}}
     else
       {:error, reason} ->
-        warn("HTTPoison.stream_next/1 error")
+        warn("HTTPoison.stream_next/1 error: #{inspect(reason)}")
 
-        if state.resume_on_error do
-          %{state | streaming: false} |> connect(true)
-        else
-          {{:error, {:stream_next, reason}}, state |> close_request()}
-        end
+        # Error here is rather caused by library error,
+        # so we retry without delay - we will either sucessfully reconnect
+        # or will get an error resulting in retry with delay
+        retry({:stream_next, reason}, state |> close_request(), false)
     end
   end
 
@@ -135,12 +147,12 @@ defmodule Membrane.Element.HTTPoison.Source do
 
   def handle_other(%HTTPoison.AsyncStatus{code: 200}, _ctx, state) do
     debug("HTTPoison: Got 200 OK")
-    {{:ok, redemand: :output}, %{state | streaming: false}}
+    {{:ok, redemand: :output}, %{state | streaming: false, retries: 0}}
   end
 
   def handle_other(%HTTPoison.AsyncStatus{code: 206}, _ctx, state) do
     debug("HTTPoison: Got 206 Partial Content")
-    {{:ok, redemand: :output}, %{state | streaming: false}}
+    {{:ok, redemand: :output}, %{state | streaming: false, retries: 0}}
   end
 
   def handle_other(%HTTPoison.AsyncStatus{code: code}, _ctx, state)
@@ -150,17 +162,17 @@ defmodule Membrane.Element.HTTPoison.Source do
     If you want to follow add `follow_redirect: true` to :poison_opts
     """)
 
-    {{:error, {:httpoison, :redirect}}, state |> close_request()}
+    retry({:httpoison, :redirect}, state |> close_request())
   end
 
   def handle_other(%HTTPoison.AsyncStatus{code: 416}, _ctx, state) do
-    warn("HTTPoison: Got 416 Invalid Range")
-    {{:error, {:httpoison, :invalid_range}}, state |> close_request()}
+    warn("HTTPoison: Got 416 Invalid Range (pos_counter is #{inspect(state.pos_counter)})")
+    retry({:httpoison, :invalid_range}, state |> close_request())
   end
 
   def handle_other(%HTTPoison.AsyncStatus{code: code}, _ctx, state) do
     warn("HTTPoison: Got unexpected status code #{code}")
-    {{:error, {:http_code, code}}, state |> close_request()}
+    retry({:http_code, code}, state |> close_request())
   end
 
   def handle_other(%HTTPoison.AsyncHeaders{headers: headers}, _ctx, state) do
@@ -193,14 +205,10 @@ defmodule Membrane.Element.HTTPoison.Source do
     {{:ok, event: {:output, %Event.EndOfStream{}}}, new_state}
   end
 
-  def handle_other(%HTTPoison.Error{reason: reason}, _ctx, %{resume_on_error: resume} = state) do
+  def handle_other(%HTTPoison.Error{reason: reason}, _ctx, state) do
     warn("HTTPoison error #{inspect(reason)}")
 
-    if resume do
-      state |> connect(true)
-    else
-      {{:error, {:httpoison, reason}}, state |> close_request()}
-    end
+    retry({:httpoison, reason}, state |> close_request())
   end
 
   def handle_other(%HTTPoison.AsyncRedirect{to: new_location}, _ctx, state) do
@@ -210,7 +218,29 @@ defmodule Membrane.Element.HTTPoison.Source do
     |> connect
   end
 
-  defp connect(state, reconnect \\ false) do
+  def handle_other(:reconnect, _ctx, state) do
+    state |> connect()
+  end
+
+  @spec retry(reason :: any(), state :: Element.state_t(), delay? :: boolean) ::
+          {:ok, Element.state_t()}
+  defp retry(reason, state, delay? \\ true)
+
+  defp retry(reason, %{retries: retries, max_retries: max_retries} = state, _delay)
+       when retries >= max_retries do
+    {{:error, reason}, state}
+  end
+
+  defp retry(_reason, state, false) do
+    connect(%{state | retries: state.retries + 1})
+  end
+
+  defp retry(_reason, %{retry_delay: delay, retries: retries} = state, true) do
+    Process.send_after(self(), :reconnect, delay |> Time.to_milliseconds())
+    {:ok, %{state | retries: retries + 1}}
+  end
+
+  defp connect(state) do
     %{
       method: method,
       location: location,
@@ -224,7 +254,7 @@ defmodule Membrane.Element.HTTPoison.Source do
     opts = opts |> Keyword.merge(stream_to: self(), async: :once)
 
     headers =
-      if reconnect and not is_live do
+      if pos > 0 and not is_live do
         [{"Range", "bytes=#{pos}-"} | headers]
       else
         headers
@@ -236,8 +266,12 @@ defmodule Membrane.Element.HTTPoison.Source do
            mockable(HTTPoison).request(method, location, body, headers, opts) do
       {:ok, %{state | async_response: async_response, streaming: true}}
     else
-      {:error, reason} -> {{:error, {:httpoison, reason}}, state}
+      {:error, reason} -> retry({:httpoison, reason}, state)
     end
+  end
+
+  defp close_request(%{async_response: nil} = state) do
+    %{state | streaming: false}
   end
 
   defp close_request(%{async_response: resp} = state) do
