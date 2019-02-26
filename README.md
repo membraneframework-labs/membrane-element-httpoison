@@ -1,5 +1,8 @@
 # Membrane Multimedia Framework: HTTPoison Element
 
+
+## WARNING: This element is deprecated. Please use [Hackney Element](https://github.com/membraneframework/membrane-element-hackney) instead
+
 [![Build Status](https://travis-ci.com/membraneframework/membrane-element-httpoison.svg?branch=master)](https://travis-ci.com/membraneframework/membrane-element-httpoison)
 
 This package provides elements that can be used to read files over HTTP using
